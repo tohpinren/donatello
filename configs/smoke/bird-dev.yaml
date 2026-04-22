@@ -1,0 +1,26 @@
+experiment_name: bird-dev-smoke
+benchmark: bird
+bird_mode: dev
+data_root: ${BIRD_ROOT}
+output_dir: outputs/bird-dev-smoke
+mutation_profile: canonical
+workers: 4
+resume: true
+overwrite: false
+
+stages:
+  normalize: true
+  mutate: true
+  equivalence: true
+  execute: true
+  counterexamples: true
+  augment: true
+  report: true
+
+timeouts:
+  verieql_seconds: 120
+  sqldriller_seconds: 300
+
+tools:
+  verieql_path: null
+  sqldriller_path: null

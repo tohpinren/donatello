@@ -1,0 +1,27 @@
+# Copy this file to configs/local/<name>.yaml and customize local paths.
+experiment_name: local-bird-dev
+benchmark: bird
+bird_mode: dev
+data_root: ~/data/bird
+output_dir: outputs/local-bird-dev
+mutation_profile: canonical
+workers: 4
+resume: true
+overwrite: false
+
+stages:
+  normalize: true
+  mutate: true
+  equivalence: true
+  execute: true
+  counterexamples: true
+  augment: true
+  report: true
+
+timeouts:
+  verieql_seconds: 120
+  sqldriller_seconds: 300
+
+tools:
+  verieql_path: null
+  sqldriller_path: null
