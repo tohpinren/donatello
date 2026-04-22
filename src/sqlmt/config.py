@@ -13,9 +13,18 @@ Benchmark = Literal["bird", "spider2"]
 BirdMode = Literal["dev", "test", "full"]
 MutationProfile = Literal["canonical"]
 
-VALID_BENCHMARKS = {"bird", "spider2"}
-VALID_BIRD_MODES = {"dev", "test", "full"}
-VALID_MUTATION_PROFILES = {"canonical"}
+BENCHMARKS = {"bird", "spider2"}
+BIRD_MODES = {"dev", "test", "full"}
+MUTATION_PROFILES = {"canonical"}
+STAGE_FIELDS = (
+    "normalize",
+    "mutate",
+    "equivalence",
+    "execute",
+    "counterexamples",
+    "augment",
+    "report",
+)
 
 
 class ConfigError(ValueError):
@@ -32,11 +41,6 @@ class StageConfig:
     augment: bool = True
     report: bool = True
 
-    @classmethod
-    def from_mapping(cls, value: object) -> StageConfig:
-        mapping = _optional_mapping(value, "stages")
-        return cls(**_known_bool_fields(mapping, cls, "stages"))
-
     def enabled(self) -> list[str]:
         return [name for name, enabled in vars(self).items() if enabled]
 
@@ -46,26 +50,11 @@ class TimeoutConfig:
     verieql_seconds: int = 120
     sqldriller_seconds: int = 300
 
-    @classmethod
-    def from_mapping(cls, value: object) -> TimeoutConfig:
-        mapping = _optional_mapping(value, "timeouts")
-        data = _known_int_fields(mapping, cls, "timeouts")
-        return cls(**data)
-
 
 @dataclass(frozen=True)
 class ToolConfig:
     verieql_path: Path | None = None
     sqldriller_path: Path | None = None
-
-    @classmethod
-    def from_mapping(cls, value: object) -> ToolConfig:
-        mapping = _optional_mapping(value, "tools")
-        _reject_unknown_fields(mapping, cls, "tools")
-        return cls(
-            verieql_path=_optional_path(mapping.get("verieql_path")),
-            sqldriller_path=_optional_path(mapping.get("sqldriller_path")),
-        )
 
 
 @dataclass(frozen=True)
@@ -83,156 +72,76 @@ class ExperimentConfig:
     timeouts: TimeoutConfig = field(default_factory=TimeoutConfig)
     tools: ToolConfig = field(default_factory=ToolConfig)
 
-    @classmethod
-    def from_mapping(cls, value: object) -> ExperimentConfig:
-        mapping = _required_mapping(value, "config")
-        _reject_unknown_fields(mapping, cls, "config")
-
-        experiment_name = _required_str(mapping, "experiment_name")
-        benchmark = _required_choice(
-            mapping,
-            "benchmark",
-            VALID_BENCHMARKS,
-        )
-        bird_mode = _required_choice(mapping, "bird_mode", VALID_BIRD_MODES)
-        mutation_profile = _optional_choice(
-            mapping,
-            "mutation_profile",
-            VALID_MUTATION_PROFILES,
-            default="canonical",
-        )
-
-        return cls(
-            experiment_name=experiment_name,
-            benchmark=cast(Benchmark, benchmark),
-            bird_mode=cast(BirdMode, bird_mode),
-            data_root=_required_path(mapping, "data_root"),
-            output_dir=_required_path(mapping, "output_dir"),
-            mutation_profile=cast(MutationProfile, mutation_profile),
-            workers=_optional_int(mapping, "workers", default=1),
-            resume=_optional_bool(mapping, "resume", default=True),
-            overwrite=_optional_bool(mapping, "overwrite", default=False),
-            stages=StageConfig.from_mapping(mapping.get("stages")),
-            timeouts=TimeoutConfig.from_mapping(mapping.get("timeouts")),
-            tools=ToolConfig.from_mapping(mapping.get("tools")),
-        )
-
-    def validate_runtime_flags(self) -> None:
-        if self.workers < 1:
-            raise ConfigError("workers must be at least 1.")
-        if self.timeouts.verieql_seconds < 1:
-            raise ConfigError("timeouts.verieql_seconds must be at least 1.")
-        if self.timeouts.sqldriller_seconds < 1:
-            raise ConfigError("timeouts.sqldriller_seconds must be at least 1.")
-        if self.resume and self.overwrite:
-            raise ConfigError("resume and overwrite cannot both be true.")
-
 
 def load_config(path: Path | str) -> ExperimentConfig:
     """Load and validate a YAML experiment config."""
 
-    config_path = Path(path)
-    if not config_path.exists():
-        raise ConfigError(f"Config file does not exist: {config_path}")
+    raw = _read_yaml(Path(path))
+    stages = _mapping(raw.get("stages"), "stages", allow_none=True)
+    timeouts = _mapping(raw.get("timeouts"), "timeouts", allow_none=True)
+    tools = _mapping(raw.get("tools"), "tools", allow_none=True)
 
-    try:
-        with config_path.open("r", encoding="utf-8") as file:
-            raw = yaml.safe_load(file)
-    except yaml.YAMLError as exc:
-        raise ConfigError(f"Invalid YAML in {config_path}: {exc}") from exc
-
-    config = ExperimentConfig.from_mapping(raw)
-    config.validate_runtime_flags()
+    config = ExperimentConfig(
+        experiment_name=_str(raw, "experiment_name"),
+        benchmark=cast(Benchmark, _choice(raw, "benchmark", BENCHMARKS)),
+        bird_mode=cast(BirdMode, _choice(raw, "bird_mode", BIRD_MODES)),
+        data_root=_path(raw, "data_root"),
+        output_dir=_path(raw, "output_dir"),
+        mutation_profile=cast(
+            MutationProfile,
+            _choice(raw, "mutation_profile", MUTATION_PROFILES, "canonical"),
+        ),
+        workers=_int(raw, "workers", 1),
+        resume=_bool(raw, "resume", True),
+        overwrite=_bool(raw, "overwrite", False),
+        stages=StageConfig(
+            **cast(Any, {name: _bool(stages, name, True) for name in STAGE_FIELDS})
+        ),
+        timeouts=TimeoutConfig(
+            verieql_seconds=_int(timeouts, "verieql_seconds", 120),
+            sqldriller_seconds=_int(timeouts, "sqldriller_seconds", 300),
+        ),
+        tools=ToolConfig(
+            verieql_path=_maybe_path(tools.get("verieql_path")),
+            sqldriller_path=_maybe_path(tools.get("sqldriller_path")),
+        ),
+    )
+    _validate(config)
     return config
 
 
-def _expand_path(value: str) -> Path:
-    return Path(os.path.expandvars(value)).expanduser()
+def _read_yaml(path: Path) -> dict[str, object]:
+    if not path.exists():
+        raise ConfigError(f"Config file does not exist: {path}")
+
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            raw = yaml.safe_load(file)
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"Invalid YAML in {path}: {exc}") from exc
+
+    return _mapping(raw, "config")
 
 
-def _required_path(mapping: dict[str, object], field_name: str) -> Path:
-    value = mapping.get(field_name)
-    if not isinstance(value, str) or not value.strip():
-        raise ConfigError(f"{field_name} must be a non-empty path string.")
-    return _expand_path(value)
+def _validate(config: ExperimentConfig) -> None:
+    if config.workers < 1:
+        raise ConfigError("workers must be at least 1.")
+    if config.timeouts.verieql_seconds < 1:
+        raise ConfigError("timeouts.verieql_seconds must be at least 1.")
+    if config.timeouts.sqldriller_seconds < 1:
+        raise ConfigError("timeouts.sqldriller_seconds must be at least 1.")
+    if config.resume and config.overwrite:
+        raise ConfigError("resume and overwrite cannot both be true.")
 
 
-def _optional_path(value: object) -> Path | None:
-    if value is None:
-        return None
-    if not isinstance(value, str) or not value.strip():
-        raise ConfigError("tool paths must be null or non-empty path strings.")
-    return _expand_path(value)
-
-
-def _required_str(mapping: dict[str, object], field_name: str) -> str:
-    value = mapping.get(field_name)
-    if not isinstance(value, str) or not value.strip():
-        raise ConfigError(f"{field_name} must be a non-empty string.")
-    return value
-
-
-def _required_choice(
-    mapping: dict[str, object],
-    field_name: str,
-    allowed: set[str],
-) -> str:
-    value = _required_str(mapping, field_name)
-    if value not in allowed:
-        allowed_values = ", ".join(sorted(allowed))
-        raise ConfigError(f"{field_name} must be one of: {allowed_values}.")
-    return value
-
-
-def _optional_choice(
-    mapping: dict[str, object],
-    field_name: str,
-    allowed: set[str],
-    *,
-    default: str,
-) -> str:
-    value = mapping.get(field_name, default)
-    if not isinstance(value, str):
-        raise ConfigError(f"{field_name} must be a string.")
-    if value not in allowed:
-        allowed_values = ", ".join(sorted(allowed))
-        raise ConfigError(f"{field_name} must be one of: {allowed_values}.")
-    return value
-
-
-def _optional_int(
-    mapping: dict[str, object],
-    field_name: str,
-    *,
-    default: int,
-) -> int:
-    value = mapping.get(field_name, default)
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ConfigError(f"{field_name} must be an integer.")
-    return value
-
-
-def _optional_bool(
-    mapping: dict[str, object],
-    field_name: str,
-    *,
-    default: bool,
-) -> bool:
-    value = mapping.get(field_name, default)
-    if not isinstance(value, bool):
-        raise ConfigError(f"{field_name} must be true or false.")
-    return value
-
-
-def _optional_mapping(value: object, name: str) -> dict[str, object]:
-    if value is None:
+def _mapping(
+    value: object, name: str, *, allow_none: bool = False
+) -> dict[str, object]:
+    if value is None and allow_none:
         return {}
-    return _required_mapping(value, name)
-
-
-def _required_mapping(value: object, name: str) -> dict[str, object]:
     if not isinstance(value, dict):
         raise ConfigError(f"{name} must be a mapping.")
+
     result: dict[str, object] = {}
     for key, item in value.items():
         if not isinstance(key, str):
@@ -241,41 +150,46 @@ def _required_mapping(value: object, name: str) -> dict[str, object]:
     return result
 
 
-def _reject_unknown_fields(
+def _str(mapping: dict[str, object], name: str, default: str | None = None) -> str:
+    value = mapping.get(name, default)
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"{name} must be a non-empty string.")
+    return value
+
+
+def _choice(
     mapping: dict[str, object],
-    model: type[Any],
-    context: str,
-) -> None:
-    allowed = set(model.__dataclass_fields__)
-    unknown = sorted(set(mapping) - allowed)
-    if unknown:
-        fields = ", ".join(unknown)
-        raise ConfigError(f"Unknown {context} field(s): {fields}.")
+    name: str,
+    allowed: set[str],
+    default: str | None = None,
+) -> str:
+    value = _str(mapping, name, default)
+    if value not in allowed:
+        raise ConfigError(f"{name} must be one of: {', '.join(sorted(allowed))}.")
+    return value
 
 
-def _known_bool_fields(
-    mapping: dict[str, object],
-    model: type[Any],
-    context: str,
-) -> dict[str, bool]:
-    _reject_unknown_fields(mapping, model, context)
-    result: dict[str, bool] = {}
-    for key, value in mapping.items():
-        if not isinstance(value, bool):
-            raise ConfigError(f"{context}.{key} must be true or false.")
-        result[key] = value
-    return result
+def _path(mapping: dict[str, object], name: str) -> Path:
+    return Path(os.path.expandvars(_str(mapping, name))).expanduser()
 
 
-def _known_int_fields(
-    mapping: dict[str, object],
-    model: type[Any],
-    context: str,
-) -> dict[str, int]:
-    _reject_unknown_fields(mapping, model, context)
-    result: dict[str, int] = {}
-    for key, value in mapping.items():
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise ConfigError(f"{context}.{key} must be an integer.")
-        result[key] = value
-    return result
+def _maybe_path(value: object) -> Path | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError("tool paths must be null or non-empty path strings.")
+    return Path(os.path.expandvars(value)).expanduser()
+
+
+def _int(mapping: dict[str, object], name: str, default: int) -> int:
+    value = mapping.get(name, default)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigError(f"{name} must be an integer.")
+    return value
+
+
+def _bool(mapping: dict[str, object], name: str, default: bool) -> bool:
+    value = mapping.get(name, default)
+    if not isinstance(value, bool):
+        raise ConfigError(f"{name} must be true or false.")
+    return value

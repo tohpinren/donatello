@@ -122,9 +122,6 @@ def run(
         typer.echo(f"Invalid config: {exc}", err=True)
         raise typer.Exit(code=2) from exc
 
-    artifacts = prepare_run(loaded)
-    configure_logging(artifacts.run_log)
-
     if dry_run:
         plan = build_dry_run_plan(loaded)
         typer.echo(f"Experiment: {plan.experiment_name}")
@@ -135,5 +132,7 @@ def run(
             typer.echo(f"  {name}: {path}")
         return
 
+    artifacts = prepare_run(loaded)
+    configure_logging(artifacts.run_log)
     typer.echo("Pipeline execution is not implemented in the foundation phase.")
     raise typer.Exit(code=2)

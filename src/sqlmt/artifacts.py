@@ -52,8 +52,6 @@ class ExperimentArtifacts:
         """Create the output directories needed before a run can write logs."""
 
         self.root.mkdir(parents=True, exist_ok=True)
-        self.counterexamples_dir.mkdir(parents=True, exist_ok=True)
-        self.augmented_databases_dir.mkdir(parents=True, exist_ok=True)
 
     def as_display_dict(self) -> dict[str, str]:
         """Return stable path names for dry-run and test output."""
