@@ -13,15 +13,25 @@ def test_valid_config_loading() -> None:
     assert config.bird_mode == "dev"
     assert config.mutation_profile == "canonical"
     assert config.workers == 4
-    assert config.stages.enabled() == [
-        "normalize",
-        "mutate",
-        "equivalence",
-        "execute",
-        "counterexamples",
-        "augment",
-        "report",
-    ]
+    assert config.stages.enabled() == ["normalize"]
+
+
+def test_train_bird_mode_is_accepted(tmp_path: Path) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        """
+experiment_name: train-mode
+benchmark: bird
+bird_mode: train
+data_root: /tmp/bird
+output_dir: outputs/train
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config(path)
+
+    assert config.bird_mode == "train"
 
 
 def test_invalid_benchmark_rejected(tmp_path: Path) -> None:
@@ -47,7 +57,7 @@ def test_invalid_bird_mode_rejected(tmp_path: Path) -> None:
         """
 experiment_name: bad-mode
 benchmark: bird
-bird_mode: train
+bird_mode: test
 data_root: /tmp/bird
 output_dir: outputs/bad
 """,

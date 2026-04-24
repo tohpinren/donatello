@@ -10,11 +10,11 @@ from typing import Any, Literal, cast
 import yaml
 
 Benchmark = Literal["bird", "spider2"]
-BirdMode = Literal["dev", "test", "full"]
+BirdMode = Literal["dev", "train", "full"]
 MutationProfile = Literal["canonical"]
 
 BENCHMARKS = {"bird", "spider2"}
-BIRD_MODES = {"dev", "test", "full"}
+BIRD_MODES = {"dev", "train", "full"}
 MUTATION_PROFILES = {"canonical"}
 STAGE_FIELDS = (
     "normalize",
