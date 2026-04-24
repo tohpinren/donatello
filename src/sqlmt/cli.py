@@ -153,8 +153,9 @@ def run(
         typer.echo(f"Pipeline error: {exc}", err=True)
         raise typer.Exit(code=2) from exc
 
+    action = "Reused" if summary.resumed else "Normalized"
     typer.echo(
-        "Normalized "
+        f"{action} "
         f"{summary.example_count} examples across {summary.database_count} databases "
         f"for {summary.benchmark}/{summary.mode}."
     )

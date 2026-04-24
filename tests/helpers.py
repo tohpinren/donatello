@@ -68,6 +68,8 @@ def write_config(
     bird_mode: str | None = "dev",
     normalize: bool = True,
     mutate: bool = False,
+    resume: bool = True,
+    overwrite: bool = False,
 ) -> Path:
     bird_mode_line = f"bird_mode: {bird_mode}\n" if bird_mode is not None else ""
     path.write_text(
@@ -76,6 +78,8 @@ experiment_name: test-run
 benchmark: {benchmark}
 {bird_mode_line}data_root: {data_root}
 output_dir: {output_dir}
+resume: {str(resume).lower()}
+overwrite: {str(overwrite).lower()}
 stages:
   normalize: {str(normalize).lower()}
   mutate: {str(mutate).lower()}

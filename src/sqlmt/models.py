@@ -71,4 +71,5 @@ class NormalizationSummary:
     example_count: int
     database_count: int
     output_path: str
+    resumed: bool = False
     skipped_stages: list[str] = field(default_factory=list)
