@@ -279,11 +279,7 @@ def c_bin_join(
     eligible = matching_nodes(
         tree,
         exp.Join,
-        lambda current: (
-            current.args.get("on") is not None
-            and current.args.get("kind") is None
-            and current.args.get("side") in {None, "LEFT"}
-        ),
+        _eligible_c_bin_join,
     )
 
     for site_index, _join in enumerate(eligible):
@@ -292,16 +288,21 @@ def c_bin_join(
             mutated,
             exp.Join,
             site_index,
-            lambda current: (
-                current.args.get("on") is not None
-                and current.args.get("kind") is None
-                and current.args.get("side") in {None, "LEFT"}
-            ),
+            _eligible_c_bin_join,
         )
         if not isinstance(target, exp.Join):
             continue
+
         current_side = target.args.get("side")
-        target.set("side", "LEFT" if current_side != "LEFT" else None)
+        current_kind = target.args.get("kind")
+        if current_side == "LEFT":
+            target.set("side", None)
+            target.set("kind", "INNER")
+        else:
+            next_kind = None if current_kind in {None, "INNER"} else current_kind
+            target.set("kind", next_kind)
+            target.set("side", "LEFT")
+
         candidates.append(
             MutationCandidate(
                 mutant_sql=serialize_sql(mutated),
@@ -313,6 +314,15 @@ def c_bin_join(
             )
         )
     return candidates
+
+
+def _eligible_c_bin_join(current: exp.Expression) -> bool:
+    return (
+        isinstance(current, exp.Join)
+        and current.args.get("on") is not None
+        and current.args.get("side") in {None, "LEFT"}
+        and current.args.get("kind") in {None, "INNER"}
+    )
 
 
 def c_sub_qual(

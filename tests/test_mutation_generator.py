@@ -356,3 +356,18 @@ def test_invalid_candidate_from_one_rule_does_not_stop_other_rules() -> None:
         record.rule == "test_good" and record.status == "generated"
         for record in records
     )
+
+
+def test_c_bin_join_supports_explicit_inner_join() -> None:
+    example = make_normalized_example(
+        "SELECT e.name FROM employees e INNER JOIN departments d "
+        "ON e.department_id = d.id",
+        schema=make_company_schema(),
+    )
+
+    records = generate_mutations([example], rules=[_rule("c_bin_join")])
+
+    generated = [record for record in records if record.status == "generated"]
+
+    assert generated
+    assert any("LEFT JOIN" in (record.mutant_sql or "") for record in generated)
