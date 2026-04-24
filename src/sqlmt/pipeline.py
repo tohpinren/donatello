@@ -40,6 +40,19 @@ def prepare_run(config: ExperimentConfig) -> ExperimentArtifacts:
     return artifacts
 
 
+def preflight_run(config: ExperimentConfig) -> None:
+    """Reject unsupported or no-op runs before creating output artifacts."""
+
+    if not config.stages.normalize:
+        raise PipelineError(
+            "No implemented stage is enabled. Set stages.normalize: true."
+        )
+    if config.benchmark != "bird":
+        raise PipelineError(
+            f"Normalization for benchmark '{config.benchmark}' is not implemented yet."
+        )
+
+
 def run_normalization(
     config: ExperimentConfig,
     *,
@@ -48,15 +61,14 @@ def run_normalization(
 ) -> NormalizationSummary:
     """Execute the implemented normalization stage for the configured benchmark."""
 
-    if not config.stages.normalize:
-        raise PipelineError(
-            "No implemented stage is enabled. Set stages.normalize: true."
-        )
-
     try:
         examples = normalize_examples(config)
     except BenchmarkError as exc:
         raise PipelineError(str(exc)) from exc
+
+    mode = config.bird_mode
+    if mode is None:
+        raise PipelineError("bird_mode is required for benchmark 'bird'.")
 
     _write_config_snapshot(config_path, artifacts.config_snapshot)
     _write_examples(artifacts.normalized_examples, examples)
@@ -66,7 +78,7 @@ def run_normalization(
     ]
     return NormalizationSummary(
         benchmark=config.benchmark,
-        mode=config.bird_mode,
+        mode=mode,
         example_count=len(examples),
         database_count=len({example.db_id for example in examples}),
         output_path=str(artifacts.normalized_examples),

@@ -34,6 +34,24 @@ output_dir: outputs/train
     assert config.bird_mode == "train"
 
 
+def test_spider2_config_does_not_require_bird_mode(tmp_path: Path) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        """
+experiment_name: spider2-mode
+benchmark: spider2
+data_root: /tmp/spider2
+output_dir: outputs/spider2
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config(path)
+
+    assert config.benchmark == "spider2"
+    assert config.bird_mode is None
+
+
 def test_invalid_benchmark_rejected(tmp_path: Path) -> None:
     path = tmp_path / "config.yaml"
     path.write_text(

@@ -15,6 +15,7 @@ from sqlmt.logging import configure_logging
 from sqlmt.pipeline import (
     PipelineError,
     build_dry_run_plan,
+    preflight_run,
     prepare_run,
     run_normalization,
 )
@@ -136,6 +137,12 @@ def run(
         for name, path in plan.artifacts.items():
             typer.echo(f"  {name}: {path}")
         return
+
+    try:
+        preflight_run(loaded)
+    except PipelineError as exc:
+        typer.echo(f"Pipeline error: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
 
     artifacts = prepare_run(loaded)
     configure_logging(artifacts.run_log)

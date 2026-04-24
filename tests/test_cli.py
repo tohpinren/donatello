@@ -122,25 +122,29 @@ def test_cli_run_reports_skipped_unimplemented_stages(tmp_path: Path) -> None:
 
 
 def test_cli_run_rejects_unimplemented_benchmark(tmp_path: Path) -> None:
+    output_dir = tmp_path / "outputs" / "spider2"
     config_path = write_config(
         tmp_path / "spider2.yaml",
         data_root=tmp_path / "spider2",
-        output_dir=tmp_path / "outputs" / "spider2",
+        output_dir=output_dir,
         benchmark="spider2",
+        bird_mode=None,
     )
 
     result = runner.invoke(app, ["run", "--config", str(config_path)])
 
     assert result.exit_code == 2
     assert "not implemented yet" in result.stdout + result.stderr
+    assert not output_dir.exists()
 
 
 def test_cli_run_requires_normalize_stage(tmp_path: Path) -> None:
     data_root = write_bird_fixture(tmp_path)
+    output_dir = tmp_path / "outputs" / "bird-dev"
     config_path = write_config(
         tmp_path / "bird-dev.yaml",
         data_root=data_root,
-        output_dir=tmp_path / "outputs" / "bird-dev",
+        output_dir=output_dir,
         normalize=False,
     )
 
@@ -148,3 +152,4 @@ def test_cli_run_requires_normalize_stage(tmp_path: Path) -> None:
 
     assert result.exit_code == 2
     assert "No implemented stage is enabled" in result.stdout + result.stderr
+    assert not output_dir.exists()

@@ -61,7 +61,7 @@ class ToolConfig:
 class ExperimentConfig:
     experiment_name: str
     benchmark: Benchmark
-    bird_mode: BirdMode
+    bird_mode: BirdMode | None
     data_root: Path
     output_dir: Path
     mutation_profile: MutationProfile = "canonical"
@@ -80,11 +80,12 @@ def load_config(path: Path | str) -> ExperimentConfig:
     stages = _mapping(raw.get("stages"), "stages", allow_none=True)
     timeouts = _mapping(raw.get("timeouts"), "timeouts", allow_none=True)
     tools = _mapping(raw.get("tools"), "tools", allow_none=True)
+    benchmark = cast(Benchmark, _choice(raw, "benchmark", BENCHMARKS))
 
     config = ExperimentConfig(
         experiment_name=_str(raw, "experiment_name"),
-        benchmark=cast(Benchmark, _choice(raw, "benchmark", BENCHMARKS)),
-        bird_mode=cast(BirdMode, _choice(raw, "bird_mode", BIRD_MODES)),
+        benchmark=benchmark,
+        bird_mode=_bird_mode(raw, benchmark),
         data_root=_path(raw, "data_root"),
         output_dir=_path(raw, "output_dir"),
         mutation_profile=cast(
@@ -167,6 +168,20 @@ def _choice(
     if value not in allowed:
         raise ConfigError(f"{name} must be one of: {', '.join(sorted(allowed))}.")
     return value
+
+
+def _bird_mode(mapping: dict[str, object], benchmark: Benchmark) -> BirdMode | None:
+    if benchmark == "bird":
+        return cast(BirdMode, _choice(mapping, "bird_mode", BIRD_MODES))
+
+    value = mapping.get("bird_mode")
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError("bird_mode must be a non-empty string when provided.")
+    if value not in BIRD_MODES:
+        raise ConfigError(f"bird_mode must be one of: {', '.join(sorted(BIRD_MODES))}.")
+    return cast(BirdMode, value)
 
 
 def _path(mapping: dict[str, object], name: str) -> Path:

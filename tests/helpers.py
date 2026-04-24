@@ -65,16 +65,16 @@ def write_config(
     data_root: Path,
     output_dir: Path,
     benchmark: str = "bird",
-    bird_mode: str = "dev",
+    bird_mode: str | None = "dev",
     normalize: bool = True,
     mutate: bool = False,
 ) -> Path:
+    bird_mode_line = f"bird_mode: {bird_mode}\n" if bird_mode is not None else ""
     path.write_text(
         f"""
 experiment_name: test-run
 benchmark: {benchmark}
-bird_mode: {bird_mode}
-data_root: {data_root}
+{bird_mode_line}data_root: {data_root}
 output_dir: {output_dir}
 stages:
   normalize: {str(normalize).lower()}

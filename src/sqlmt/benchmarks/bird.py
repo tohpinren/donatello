@@ -58,7 +58,9 @@ class BirdAdapter(BenchmarkAdapter):
         return examples
 
 
-def _splits_for_mode(mode: str) -> list[str]:
+def _splits_for_mode(mode: str | None) -> list[str]:
+    if mode is None:
+        raise BenchmarkError("bird_mode is required for benchmark 'bird'.")
     if mode == "full":
         return ["dev", "train"]
     if mode in SPLIT_FILES:
