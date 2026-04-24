@@ -1,9 +1,9 @@
-"""Shared data contracts for normalized benchmark examples."""
+"""Shared data contracts for normalized examples and mutation artifacts."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal, cast
 
 
 @dataclass(frozen=True)
@@ -28,6 +28,29 @@ class NormalizedSchema:
             "primary_keys": self.primary_keys,
             "foreign_keys": self.foreign_keys,
         }
+
+    @classmethod
+    def from_dict(cls, row: dict[str, Any]) -> NormalizedSchema:
+        return cls(
+            table_names=[str(value) for value in row["table_names"]],
+            table_names_original=[str(value) for value in row["table_names_original"]],
+            column_names=[
+                (int(table_index), str(name))
+                for table_index, name in row["column_names"]
+            ],
+            column_names_original=[
+                (int(table_index), str(name))
+                for table_index, name in row["column_names_original"]
+            ],
+            column_types=[str(value) for value in row["column_types"]],
+            primary_keys=[
+                tuple(int(part) for part in key) if isinstance(key, list) else int(key)
+                for key in row["primary_keys"]
+            ],
+            foreign_keys=[
+                (int(source), int(target)) for source, target in row["foreign_keys"]
+            ],
+        )
 
 
 @dataclass(frozen=True)
@@ -61,6 +84,24 @@ class NormalizedExample:
             "metadata": self.metadata,
         }
 
+    @classmethod
+    def from_dict(cls, row: dict[str, Any]) -> NormalizedExample:
+        return cls(
+            example_id=str(row["example_id"]),
+            benchmark=str(row["benchmark"]),
+            subset=str(row["subset"]),
+            source_id=(
+                str(row["source_id"]) if row.get("source_id") is not None else None
+            ),
+            db_id=str(row["db_id"]),
+            question=str(row["question"]),
+            gold_sql=str(row["gold_sql"]),
+            sqlite_path=str(row["sqlite_path"]),
+            sqlite_relpath=str(row["sqlite_relpath"]),
+            schema=NormalizedSchema.from_dict(dict(row["schema"])),
+            metadata=dict(row.get("metadata", {})),
+        )
+
 
 @dataclass(frozen=True)
 class NormalizationSummary:
@@ -70,6 +111,92 @@ class NormalizationSummary:
     mode: str
     example_count: int
     database_count: int
+    output_path: str
+    resumed: bool = False
+    skipped_stages: list[str] = field(default_factory=list)
+
+
+MutationStatus = Literal["generated", "skipped"]
+MutationSkipReason = Literal[
+    "parse_error",
+    "rule_not_applicable",
+    "invalid_mutant_sql",
+    "same_as_gold",
+    "duplicate_sql",
+]
+
+
+@dataclass(frozen=True)
+class MutationRecord:
+    mutant_id: str
+    example_id: str
+    benchmark: str
+    subset: str
+    db_id: str
+    source_id: str | None
+    question: str
+    rule: str
+    profile: str
+    status: MutationStatus
+    skip_reason: MutationSkipReason | None
+    gold_sql: str
+    mutant_sql: str | None
+    sqlite_path: str
+    sqlite_relpath: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "mutant_id": self.mutant_id,
+            "example_id": self.example_id,
+            "benchmark": self.benchmark,
+            "subset": self.subset,
+            "db_id": self.db_id,
+            "source_id": self.source_id,
+            "question": self.question,
+            "rule": self.rule,
+            "profile": self.profile,
+            "status": self.status,
+            "skip_reason": self.skip_reason,
+            "gold_sql": self.gold_sql,
+            "mutant_sql": self.mutant_sql,
+            "sqlite_path": self.sqlite_path,
+            "sqlite_relpath": self.sqlite_relpath,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, row: dict[str, Any]) -> MutationRecord:
+        return cls(
+            mutant_id=str(row["mutant_id"]),
+            example_id=str(row["example_id"]),
+            benchmark=str(row["benchmark"]),
+            subset=str(row["subset"]),
+            db_id=str(row["db_id"]),
+            source_id=(
+                str(row["source_id"]) if row.get("source_id") is not None else None
+            ),
+            question=str(row["question"]),
+            rule=str(row["rule"]),
+            profile=str(row["profile"]),
+            status=cast(MutationStatus, row["status"]),
+            skip_reason=cast(MutationSkipReason | None, row.get("skip_reason")),
+            gold_sql=str(row["gold_sql"]),
+            mutant_sql=(
+                str(row["mutant_sql"]) if row.get("mutant_sql") is not None else None
+            ),
+            sqlite_path=str(row["sqlite_path"]),
+            sqlite_relpath=str(row["sqlite_relpath"]),
+            metadata=dict(row.get("metadata", {})),
+        )
+
+
+@dataclass(frozen=True)
+class MutationSummary:
+    benchmark: str
+    profile: str
+    generated_count: int
+    skipped_count: int
     output_path: str
     resumed: bool = False
     skipped_stages: list[str] = field(default_factory=list)
