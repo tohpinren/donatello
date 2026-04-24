@@ -12,7 +12,13 @@ import typer
 from sqlmt import __version__
 from sqlmt.config import ConfigError, load_config
 from sqlmt.logging import configure_logging
-from sqlmt.pipeline import build_dry_run_plan, prepare_run
+from sqlmt.pipeline import (
+    PipelineError,
+    build_dry_run_plan,
+    preflight_run,
+    prepare_run,
+    run_normalization,
+)
 
 app = typer.Typer(
     help="SQL mutation testing framework for Text-to-SQL benchmark evaluation.",
@@ -132,7 +138,27 @@ def run(
             typer.echo(f"  {name}: {path}")
         return
 
+    try:
+        preflight_run(loaded)
+    except PipelineError as exc:
+        typer.echo(f"Pipeline error: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
     artifacts = prepare_run(loaded)
     configure_logging(artifacts.run_log)
-    typer.echo("Pipeline execution is not implemented in the foundation phase.")
-    raise typer.Exit(code=2)
+
+    try:
+        summary = run_normalization(loaded, config_path=config, artifacts=artifacts)
+    except PipelineError as exc:
+        typer.echo(f"Pipeline error: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    action = "Reused" if summary.resumed else "Normalized"
+    typer.echo(
+        f"{action} "
+        f"{summary.example_count} examples across {summary.database_count} databases "
+        f"for {summary.benchmark}/{summary.mode}."
+    )
+    typer.echo(f"Wrote: {summary.output_path}")
+    if summary.skipped_stages:
+        typer.echo("Skipped unimplemented stages: " + ", ".join(summary.skipped_stages))

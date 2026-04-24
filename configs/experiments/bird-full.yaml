@@ -10,12 +10,12 @@ overwrite: false
 
 stages:
   normalize: true
-  mutate: true
-  equivalence: true
-  execute: true
-  counterexamples: true
-  augment: true
-  report: true
+  mutate: false
+  equivalence: false
+  execute: false
+  counterexamples: false
+  augment: false
+  report: false
 
 timeouts:
   verieql_seconds: 120

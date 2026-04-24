@@ -1,11 +1,19 @@
-"""Pipeline orchestration placeholders for the foundation phase."""
+"""Pipeline orchestration for dry runs and benchmark normalization."""
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 
 from sqlmt.artifacts import ExperimentArtifacts, artifacts_for
+from sqlmt.benchmarks import BenchmarkError, normalize_examples
 from sqlmt.config import ExperimentConfig
+from sqlmt.models import NormalizationSummary, NormalizedExample
+
+
+class PipelineError(RuntimeError):
+    """Raised when the configured pipeline cannot be executed."""
 
 
 @dataclass(frozen=True)
@@ -30,3 +38,121 @@ def prepare_run(config: ExperimentConfig) -> ExperimentArtifacts:
     artifacts = artifacts_for(config.output_dir)
     artifacts.ensure_base_dirs()
     return artifacts
+
+
+def preflight_run(config: ExperimentConfig) -> None:
+    """Reject unsupported or no-op runs before creating output artifacts."""
+
+    if not config.stages.normalize:
+        raise PipelineError(
+            "No implemented stage is enabled. Set stages.normalize: true."
+        )
+    if config.benchmark != "bird":
+        raise PipelineError(
+            f"Normalization for benchmark '{config.benchmark}' is not implemented yet."
+        )
+
+
+def run_normalization(
+    config: ExperimentConfig,
+    *,
+    config_path: Path,
+    artifacts: ExperimentArtifacts,
+) -> NormalizationSummary:
+    """Execute the implemented normalization stage for the configured benchmark."""
+
+    try:
+        examples = normalize_examples(config)
+    except BenchmarkError as exc:
+        raise PipelineError(str(exc)) from exc
+
+    mode = config.bird_mode
+    if mode is None:
+        raise PipelineError("bird_mode is required for benchmark 'bird'.")
+
+    existing_outputs = [
+        path
+        for path in (artifacts.config_snapshot, artifacts.normalized_examples)
+        if path.exists()
+    ]
+    if existing_outputs:
+        if config.overwrite:
+            pass
+        elif config.resume:
+            return _summarize_existing_normalization(config, artifacts, mode)
+        existing = ", ".join(str(path.name) for path in existing_outputs)
+        raise PipelineError(
+            f"Normalization outputs already exist: {existing}. "
+            "Set resume: true to reuse them or overwrite: true to replace them."
+        )
+
+    _write_config_snapshot(config_path, artifacts.config_snapshot)
+    _write_examples(artifacts.normalized_examples, examples)
+
+    skipped_stages = [
+        stage for stage in config.stages.enabled() if stage != "normalize"
+    ]
+    return NormalizationSummary(
+        benchmark=config.benchmark,
+        mode=mode,
+        example_count=len(examples),
+        database_count=len({example.db_id for example in examples}),
+        output_path=str(artifacts.normalized_examples),
+        skipped_stages=skipped_stages,
+    )
+
+
+def _write_config_snapshot(source: Path, target: Path) -> None:
+    target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+
+
+def _write_examples(path: Path, examples: list[NormalizedExample]) -> None:
+    with path.open("w", encoding="utf-8") as file:
+        for example in examples:
+            file.write(json.dumps(example.to_dict(), ensure_ascii=True))
+            file.write("\n")
+
+
+def _summarize_existing_normalization(
+    config: ExperimentConfig,
+    artifacts: ExperimentArtifacts,
+    mode: str,
+) -> NormalizationSummary:
+    if not artifacts.normalized_examples.exists():
+        raise PipelineError(
+            "resume is true but normalized_examples.jsonl does not exist."
+        )
+
+    example_count = 0
+    db_ids: set[str] = set()
+    with artifacts.normalized_examples.open("r", encoding="utf-8") as file:
+        for line_number, line in enumerate(file, start=1):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise PipelineError(
+                    "Existing normalized_examples.jsonl is not valid JSONL: "
+                    f"line {line_number}."
+                ) from exc
+            if not isinstance(row, dict) or not isinstance(row.get("db_id"), str):
+                raise PipelineError(
+                    "Existing normalized_examples.jsonl has an invalid row shape: "
+                    f"line {line_number}."
+                )
+            example_count += 1
+            db_ids.add(row["db_id"])
+
+    skipped_stages = [
+        stage for stage in config.stages.enabled() if stage != "normalize"
+    ]
+    return NormalizationSummary(
+        benchmark=config.benchmark,
+        mode=mode,
+        example_count=example_count,
+        database_count=len(db_ids),
+        output_path=str(artifacts.normalized_examples),
+        resumed=True,
+        skipped_stages=skipped_stages,
+    )
