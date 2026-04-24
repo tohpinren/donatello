@@ -17,6 +17,7 @@ from sqlmt.pipeline import (
     build_dry_run_plan,
     preflight_run,
     prepare_run,
+    run_mutation_generation,
     run_normalization,
 )
 
@@ -147,18 +148,54 @@ def run(
     artifacts = prepare_run(loaded)
     configure_logging(artifacts.run_log)
 
+    normalization_summary = None
+    mutation_summary = None
+
     try:
-        summary = run_normalization(loaded, config_path=config, artifacts=artifacts)
+        if loaded.stages.normalize:
+            normalization_summary = run_normalization(
+                loaded,
+                config_path=config,
+                artifacts=artifacts,
+            )
+        if loaded.stages.mutate:
+            mutation_summary = run_mutation_generation(
+                loaded,
+                config_path=config,
+                artifacts=artifacts,
+            )
     except PipelineError as exc:
         typer.echo(f"Pipeline error: {exc}", err=True)
         raise typer.Exit(code=2) from exc
 
-    action = "Reused" if summary.resumed else "Normalized"
-    typer.echo(
-        f"{action} "
-        f"{summary.example_count} examples across {summary.database_count} databases "
-        f"for {summary.benchmark}/{summary.mode}."
+    if normalization_summary is not None:
+        action = "Reused" if normalization_summary.resumed else "Normalized"
+        typer.echo(
+            f"{action} "
+            f"{normalization_summary.example_count} examples across "
+            f"{normalization_summary.database_count} databases "
+            f"for {normalization_summary.benchmark}/{normalization_summary.mode}."
+        )
+        typer.echo(f"Wrote: {normalization_summary.output_path}")
+
+    if mutation_summary is not None:
+        action = "Reused mutations" if mutation_summary.resumed else "Mutated"
+        typer.echo(
+            f"{action} "
+            f"{mutation_summary.generated_count} generated and "
+            f"{mutation_summary.skipped_count} skipped mutation attempts "
+            f"for {mutation_summary.benchmark}/{mutation_summary.profile}."
+        )
+        typer.echo(f"Wrote: {mutation_summary.output_path}")
+
+    skipped_stages = (
+        mutation_summary.skipped_stages
+        if mutation_summary is not None
+        else (
+            normalization_summary.skipped_stages
+            if normalization_summary is not None
+            else []
+        )
     )
-    typer.echo(f"Wrote: {summary.output_path}")
-    if summary.skipped_stages:
-        typer.echo("Skipped unimplemented stages: " + ", ".join(summary.skipped_stages))
+    if skipped_stages:
+        typer.echo("Skipped unimplemented stages: " + ", ".join(skipped_stages))
