@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable
 
 import pytest
@@ -371,3 +372,82 @@ def test_c_bin_join_supports_explicit_inner_join() -> None:
 
     assert generated
     assert any("LEFT JOIN" in (record.mutant_sql or "") for record in generated)
+
+
+def test_a_topk_ties_keeps_offset_removal_sqlite_valid() -> None:
+    example = make_normalized_example(
+        "SELECT 1 ORDER BY 1 LIMIT 9, 2",
+        schema=make_company_schema(),
+    )
+
+    records = generate_mutations([example], rules=[_rule("a_topk_ties")])
+
+    generated = [record for record in records if record.status == "generated"]
+
+    assert generated
+    assert any(
+        (record.mutant_sql or "").endswith("LIMIT -1 OFFSET 9") for record in generated
+    )
+
+    connection = sqlite3.connect(":memory:")
+    try:
+        for record in generated:
+            assert record.mutant_sql is not None
+            connection.execute(record.mutant_sql).fetchall()
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize(
+    "rule_id",
+    ["a_subq_corr_drop", "b_subq_scope_typo"],
+)
+def test_scope_sensitive_subquery_rules_ignore_derived_table_aliases(
+    rule_id: str,
+) -> None:
+    example = make_normalized_example(
+        (
+            "SELECT e.name FROM employees e WHERE e.department_id = ("
+            "SELECT d2.id FROM (SELECT d.id FROM departments d) AS d2)"
+        ),
+        schema=make_company_schema(),
+    )
+
+    records = generate_mutations([example], rules=[_rule(rule_id)])
+
+    assert [record.status for record in records] == ["skipped"]
+    assert records[0].skip_reason == "rule_not_applicable"
+
+
+def test_c_sub_qual_qualifies_unqualified_outer_column() -> None:
+    example = make_normalized_example(
+        (
+            "SELECT e.name FROM employees e WHERE id IN ("
+            "SELECT d.id FROM departments d WHERE d.region = 'APAC')"
+        ),
+        schema=make_company_schema(),
+    )
+
+    records = generate_mutations([example], rules=[_rule("c_sub_qual")])
+
+    generated = [record for record in records if record.status == "generated"]
+
+    assert generated
+    assert any("d.id = e.id" in (record.mutant_sql or "") for record in generated)
+    assert all(" id = id" not in (record.mutant_sql or "") for record in generated)
+
+
+def test_c_sub_qual_skips_ambiguous_unqualified_outer_column() -> None:
+    example = make_normalized_example(
+        (
+            "SELECT e.name FROM employees e "
+            "JOIN departments d ON e.department_id = d.id "
+            "WHERE id IN (SELECT p.id FROM projects p)"
+        ),
+        schema=make_company_schema(),
+    )
+
+    records = generate_mutations([example], rules=[_rule("c_sub_qual")])
+
+    assert [record.status for record in records] == ["skipped"]
+    assert records[0].skip_reason == "rule_not_applicable"

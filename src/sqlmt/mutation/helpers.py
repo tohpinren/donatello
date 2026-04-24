@@ -306,4 +306,10 @@ def _table_source(expression: exp.Expression | None) -> list[tuple[str, str]]:
         table_name = expression.name
         alias = expression.alias_or_name
         return [(alias, table_name)]
+    if isinstance(expression, exp.Subquery):
+        alias = expression.alias_or_name
+        if alias:
+            # Derived-table aliases participate in local scope resolution, but they
+            # do not map directly back to a physical schema table.
+            return [(alias, alias)]
     return []

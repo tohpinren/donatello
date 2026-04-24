@@ -107,7 +107,10 @@ def a_topk_ties(
             )
 
             removed = clone_expression(select)
-            removed.set("limit", None)
+            if removed.args.get("offset") is not None:
+                removed.set("limit", exp.Limit(expression=exp.Literal.number(-1)))
+            else:
+                removed.set("limit", None)
             candidates.append(
                 MutationCandidate(
                     mutant_sql=serialize_sql(removed),

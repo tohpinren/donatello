@@ -21,6 +21,7 @@ from sqlmt.mutation.helpers import (
     serialize_sql,
     split_and_conditions,
     top_level_select,
+    visible_columns,
 )
 from sqlmt.mutation.profile import MutationCandidate, MutationRule
 
@@ -330,12 +331,15 @@ def c_sub_qual(
     tree: exp.Expression,
 ) -> list[MutationCandidate]:
     candidates: list[MutationCandidate] = []
-    candidates.extend(_in_to_exists(tree))
+    candidates.extend(_in_to_exists(example, tree))
     candidates.extend(_exists_to_in(tree))
     return candidates
 
 
-def _in_to_exists(tree: exp.Expression) -> list[MutationCandidate]:
+def _in_to_exists(
+    example: NormalizedExample,
+    tree: exp.Expression,
+) -> list[MutationCandidate]:
     candidates: list[MutationCandidate] = []
     for site_index, node in enumerate(
         matching_nodes(
@@ -344,7 +348,7 @@ def _in_to_exists(tree: exp.Expression) -> list[MutationCandidate]:
             lambda current: isinstance(current.args.get("query"), exp.Subquery),
         )
     ):
-        if not isinstance(node.this, exp.Column):
+        if not isinstance(node, exp.In) or not isinstance(node.this, exp.Column):
             continue
         subquery = node.args.get("query")
         if not isinstance(subquery, exp.Subquery) or not isinstance(
@@ -357,6 +361,9 @@ def _in_to_exists(tree: exp.Expression) -> list[MutationCandidate]:
             inner_select.expressions[0],
             exp.Column,
         ):
+            continue
+        outer_column = _resolve_outer_in_column(example, node)
+        if outer_column is None:
             continue
 
         mutated = clone_expression(tree)
@@ -377,7 +384,7 @@ def _in_to_exists(tree: exp.Expression) -> list[MutationCandidate]:
         target_select = target_subquery.this
         inner_column = target_select.expressions[0].copy()
         target_select.set("expressions", [exp.Literal.number(1)])
-        equality = exp.EQ(this=inner_column, expression=target.this.copy())
+        equality = exp.EQ(this=inner_column, expression=outer_column.copy())
         target_where = target_select.args.get("where")
         predicate = (
             join_conditions(target_where.this, equality)
@@ -393,6 +400,39 @@ def _in_to_exists(tree: exp.Expression) -> list[MutationCandidate]:
             )
         )
     return candidates
+
+
+def _resolve_outer_in_column(
+    example: NormalizedExample,
+    predicate: exp.In,
+) -> exp.Column | None:
+    outer_column = predicate.this
+    if not isinstance(outer_column, exp.Column):
+        return None
+    if outer_column.table:
+        return outer_column.copy()
+
+    outer_select = _enclosing_select(predicate)
+    if outer_select is None:
+        return None
+
+    matches = visible_columns(
+        example.schema,
+        local_alias_map(outer_select),
+        same_name_as=outer_column.name,
+    )
+    if len(matches) != 1:
+        return None
+    return matches[0].to_expression()
+
+
+def _enclosing_select(expression: exp.Expression) -> exp.Select | None:
+    current = expression.parent
+    while current is not None:
+        if isinstance(current, exp.Select):
+            return current
+        current = current.parent
+    return None
 
 
 def _exists_to_in(tree: exp.Expression) -> list[MutationCandidate]:
