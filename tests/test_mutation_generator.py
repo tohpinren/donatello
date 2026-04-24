@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 import pytest
 from sqlglot import parse_one
@@ -132,10 +132,7 @@ RULE_CASES = [
     ),
     (
         "c_pred_lcr",
-        (
-            "SELECT e.name FROM employees e "
-            "WHERE e.salary > 100 AND e.department_id > 1"
-        ),
+        ("SELECT e.name FROM employees e WHERE e.salary > 100 AND e.department_id > 1"),
         "SELECT e.name FROM employees e WHERE e.salary > 100",
         make_company_schema,
         make_company_schema,

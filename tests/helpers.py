@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from sqlmt.models import NormalizedExample, NormalizedSchema
 
@@ -149,7 +150,7 @@ def write_normalized_examples(path: Path, examples: list[NormalizedExample]) -> 
     return path
 
 
-def read_jsonl(path: Path) -> list[dict[str, object]]:
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
     return [
         json.loads(line)
         for line in path.read_text(encoding="utf-8").splitlines()
@@ -226,7 +227,7 @@ def _schema_from_tables(
     column_names_original: list[tuple[int, str]] = [(-1, "*")]
     column_types: list[str] = ["text"]
 
-    for table_index, (table_name, columns) in enumerate(tables.items()):
+    for table_index, (_table_name, columns) in enumerate(tables.items()):
         for column_name, column_type in columns:
             column_names.append((table_index, column_name))
             column_names_original.append((table_index, column_name))

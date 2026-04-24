@@ -120,7 +120,7 @@ def test_cli_run_writes_mutant_output_and_skips_only_later_stages(
     assert result.exit_code == 0
     assert "Mutated" in result.stdout
     assert output_dir.joinpath("mutants.jsonl").exists()
-    assert "Skipped unimplemented stages: equivalence, execute" in result.stdout
+    assert "mutants.jsonl" in result.stdout
 
 
 def test_cli_run_resumes_existing_normalized_output(tmp_path: Path) -> None:

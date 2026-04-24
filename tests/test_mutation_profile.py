@@ -68,7 +68,9 @@ def test_mutation_record_serializes_expected_row_shape() -> None:
         "status": "generated",
         "skip_reason": None,
         "gold_sql": "SELECT e.name FROM employees e WHERE e.manager_id IS NULL",
-        "mutant_sql": "SELECT e.name FROM employees AS e WHERE e.manager_id IS NOT NULL",
+        "mutant_sql": (
+            "SELECT e.name FROM employees AS e WHERE e.manager_id IS NOT NULL"
+        ),
         "sqlite_path": "/tmp/company.sqlite",
         "sqlite_relpath": "dev/dev_databases/company/company.sqlite",
         "metadata": {"site_index": 0, "from": "IS NULL", "to": "IS NOT NULL"},
