@@ -26,6 +26,9 @@ def generate_mutations(
     profile: str = "canonical",
     max_generated_per_rule: int = DEFAULT_MAX_GENERATED_MUTANTS_PER_RULE,
 ) -> list[MutationRecord]:
+    if max_generated_per_rule < 1:
+        raise ValueError("max_generated_per_rule must be at least 1.")
+
     ordered_rules = ensure_rule_sequence(rules)
     records: list[MutationRecord] = []
 

@@ -349,6 +349,28 @@ def test_mutation_generation_cap_is_overrideable() -> None:
     assert len(generated) == 2
 
 
+@pytest.mark.parametrize("cap", [0, -1])
+def test_mutation_generation_rejects_non_positive_cap(cap: int) -> None:
+    example = make_normalized_example("SELECT 99")
+    rule = MutationRule(
+        rule_id="test_invalid_cap",
+        apply=lambda example, tree: [
+            MutationCandidate(
+                mutant_sql="SELECT 1",
+                metadata={"site_index": 0},
+            )
+        ],
+    )
+
+    with pytest.raises(ValueError, match="max_generated_per_rule must be at least 1"):
+        generate_mutations(
+            [example],
+            rules=[rule],
+            profile="test",
+            max_generated_per_rule=cap,
+        )
+
+
 def test_invalid_candidate_from_one_rule_does_not_stop_other_rules() -> None:
     example = make_normalized_example("SELECT e.name FROM employees e")
     bad_rule = MutationRule(
