@@ -48,6 +48,7 @@ def test_verieql_input_uses_generated_mutants_and_schema() -> None:
     schema = cast(dict[str, dict[str, str]], row["schema"])
     constraints = cast(list[Any], row["constraint"])
     assert schema["EMPLOYEES"]["SALARY"] == "INT"
+    assert schema["DEPARTMENTS"]["ID"] == "INT"
     assert {"primary": [{"value": "EMPLOYEES__ID"}]} in constraints
 
 
@@ -84,6 +85,11 @@ def test_run_equivalence_filtering_maps_verieql_states_and_writes_artifact(
                 mutant_sql="SELECT name FROM employees WHERE salary <> 100",
             ),
             _mutation(
+                mutant_id="not_implemented",
+                gold_sql=example.gold_sql,
+                mutant_sql="SELECT name FROM employees WHERE name LIKE 'A%'",
+            ),
+            _mutation(
                 mutant_id="error",
                 gold_sql=example.gold_sql,
                 mutant_sql="SELECT name FROM employees WHERE salary = 100",
@@ -99,11 +105,11 @@ def test_run_equivalence_filtering_maps_verieql_states_and_writes_artifact(
         runner=_fake_verieql_runner,
     )
 
-    assert summary.checked_count == 5
+    assert summary.checked_count == 6
     assert summary.proven_equivalent_count == 1
     assert summary.likely_non_equivalent_count == 1
     assert summary.timeout_count == 1
-    assert summary.unsupported_count == 1
+    assert summary.unsupported_count == 2
     assert summary.error_count == 1
     assert summary.output_path == str(artifacts.equivalence)
 
@@ -113,6 +119,7 @@ def test_run_equivalence_filtering_maps_verieql_states_and_writes_artifact(
         "neq",
         "timeout",
         "unsupported",
+        "not_implemented",
         "error",
     ]
     assert [row["outcome"] for row in rows] == [
@@ -120,10 +127,12 @@ def test_run_equivalence_filtering_maps_verieql_states_and_writes_artifact(
         "likely_non_equivalent",
         "timeout",
         "unsupported",
+        "unsupported",
         "error",
     ]
-    assert rows[4]["raw_state"] == "SYN"
-    assert rows[4]["error"] == "syntax"
+    assert rows[4]["raw_state"] == "NIE"
+    assert rows[5]["raw_state"] == "SYN"
+    assert rows[5]["error"] == "syntax"
 
 
 def test_run_equivalence_filtering_resumes_existing_artifact(
@@ -179,7 +188,7 @@ def _fake_verieql_runner(
     timeout: int,
 ) -> subprocess.CompletedProcess[str]:
     assert cwd.name == "VeriEQL"
-    assert timeout == 685
+    assert timeout == 810
     assert command[:3] == [
         "/tmp/verieql/bin/python",
         "-m",
@@ -193,6 +202,7 @@ def _fake_verieql_runner(
         "neq",
         "timeout",
         "unsupported",
+        "not_implemented",
         "error",
     ]
 
@@ -201,6 +211,7 @@ def _fake_verieql_runner(
         "neq": ("NEQ", "counterexample"),
         "timeout": ("TMO", None),
         "unsupported": ("NSE", None),
+        "not_implemented": ("NIE", None),
         "error": ("SYN", None),
     }
     with output_path.open("w", encoding="utf-8") as file:

@@ -402,18 +402,24 @@ def _error_record(
 def _schema_for_verieql(schema: NormalizedSchema) -> dict[str, dict[str, str]]:
     """Convert normalized schema metadata into VeriEQL's table/column map."""
 
-    table_names = schema.table_names_original or schema.table_names
-    result = {_verieql_identifier(table): {} for table in table_names}
+    result: dict[str, dict[str, str]] = {}
+    for table_names in (schema.table_names_original, schema.table_names):
+        for table_name in table_names:
+            result.setdefault(_verieql_identifier(table_name), {})
+
     for index, (table_index, column_name) in enumerate(schema.column_names_original):
         if table_index < 0 or column_name == "*":
             continue
-        table_name = _verieql_identifier(table_names[table_index])
         column_type = (
             schema.column_types[index] if index < len(schema.column_types) else ""
         )
-        result[table_name][_verieql_identifier(column_name)] = _verieql_type(
-            column_type
-        )
+        for table_names in (schema.table_names_original, schema.table_names):
+            if table_index >= len(table_names):
+                continue
+            table_name = _verieql_identifier(table_names[table_index])
+            result[table_name][_verieql_identifier(column_name)] = _verieql_type(
+                column_type
+            )
     return result
 
 
@@ -481,7 +487,7 @@ def _outcome_for_state(raw_state: str | None) -> EquivalenceOutcome:
         return "likely_non_equivalent"
     if raw_state == "TMO":
         return "timeout"
-    if raw_state == "NSE":
+    if raw_state in {"NSE", "NIE"}:
         return "unsupported"
     return "error"
 
