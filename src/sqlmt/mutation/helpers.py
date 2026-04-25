@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import cast
 
 from sqlglot import exp, parse_one
-from sqlglot.errors import ParseError
 
 from sqlmt.models import NormalizedSchema
 
@@ -53,16 +52,6 @@ def normalize_sql(sql: str) -> str:
     """Parse and reserialize SQL to obtain a canonical comparable form."""
 
     return serialize_sql(parse_sql(sql))
-
-
-def reparses(sql: str) -> bool:
-    """Return ``True`` when the given SQL parses successfully with SQLGlot."""
-
-    try:
-        parse_sql(sql)
-    except ParseError:
-        return False
-    return True
 
 
 def matching_nodes(
@@ -137,25 +126,6 @@ def schema_columns(schema: NormalizedSchema) -> list[tuple[int, str, str, int]]:
         table_name = schema.table_names[table_index]
         columns.append((column_index, table_name, column_name, table_index))
     return columns
-
-
-def column_type(
-    schema: NormalizedSchema,
-    *,
-    table_name: str,
-    column_name: str,
-) -> str | None:
-    """Look up the normalized type for one table-qualified column."""
-
-    for (
-        column_index,
-        schema_table_name,
-        schema_column_name,
-        _,
-    ) in schema_columns(schema):
-        if schema_table_name == table_name and schema_column_name == column_name:
-            return schema.column_types[column_index]
-    return None
 
 
 def visible_columns(
@@ -315,13 +285,6 @@ def column_info_for_reference(
     for alias, table_name in alias_map:
         if alias != column.table:
             continue
-        current_type = column_type(
-            schema,
-            table_name=table_name,
-            column_name=column.name,
-        )
-        if current_type is None:
-            return None
         for (
             column_index,
             schema_table_name,
@@ -333,7 +296,7 @@ def column_info_for_reference(
                     alias=alias,
                     table_name=table_name,
                     column_name=column.name,
-                    column_type=current_type,
+                    column_type=schema.column_types[column_index],
                     column_index=column_index,
                 )
     return None

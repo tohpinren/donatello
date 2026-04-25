@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
+from typing import TypeVar
 
 from sqlglot.errors import ParseError
 
@@ -17,6 +19,7 @@ from sqlmt.mutation.helpers import normalize_sql, parse_sql, serialize_sql
 from sqlmt.mutation.profile import MutationRule, ensure_rule_sequence
 
 DEFAULT_MAX_GENERATED_MUTANTS_PER_RULE = 3
+RowT = TypeVar("RowT")
 
 
 def generate_mutations(
@@ -40,7 +43,7 @@ def generate_mutations(
             canonical_gold_sql = serialize_sql(parsed)
         except ParseError:
             for rule in ordered_rules:
-                records.extend(
+                records.append(
                     _skip_record(
                         example,
                         rule.rule_id,
@@ -56,7 +59,7 @@ def generate_mutations(
             try:
                 candidates = rule.apply(example, parsed)
             except Exception as exc:  # pragma: no cover - defensive isolation
-                records.extend(
+                records.append(
                     _skip_record(
                         example,
                         rule.rule_id,
@@ -69,7 +72,7 @@ def generate_mutations(
                 continue
 
             if not candidates:
-                records.extend(
+                records.append(
                     _skip_record(
                         example,
                         rule.rule_id,
@@ -90,7 +93,7 @@ def generate_mutations(
                 try:
                     canonical_mutant_sql = normalize_sql(candidate.mutant_sql)
                 except ParseError:
-                    records.extend(
+                    records.append(
                         _skip_record(
                             example,
                             rule.rule_id,
@@ -103,7 +106,7 @@ def generate_mutations(
                     continue
 
                 if canonical_mutant_sql == canonical_gold_sql:
-                    records.extend(
+                    records.append(
                         _skip_record(
                             example,
                             rule.rule_id,
@@ -116,7 +119,7 @@ def generate_mutations(
                     continue
 
                 if canonical_mutant_sql in generated_sqls:
-                    records.extend(
+                    records.append(
                         _skip_record(
                             example,
                             rule.rule_id,
@@ -156,7 +159,7 @@ def generate_mutations(
                 generated_for_rule += 1
 
             if not emitted_any:
-                records.extend(
+                records.append(
                     _skip_record(
                         example,
                         rule.rule_id,
@@ -172,46 +175,21 @@ def generate_mutations(
 def read_normalized_examples(path: Path) -> list[NormalizedExample]:
     """Read normalized examples from the JSONL artifact written by normalization."""
 
-    examples: list[NormalizedExample] = []
-    with path.open("r", encoding="utf-8") as file:
-        for line_number, line in enumerate(file, start=1):
-            if not line.strip():
-                continue
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError as exc:
-                raise ValueError(
-                    f"normalized_examples.jsonl is not valid JSONL: line {line_number}."
-                ) from exc
-            if not isinstance(row, dict):
-                raise ValueError(
-                    "normalized_examples.jsonl row "
-                    f"{line_number} must be a JSON object."
-                )
-            examples.append(NormalizedExample.from_dict(row))
-    return examples
+    return _read_jsonl(
+        path,
+        row_label="normalized_examples.jsonl",
+        loader=NormalizedExample.from_dict,
+    )
 
 
 def read_mutation_records(path: Path) -> list[MutationRecord]:
     """Read mutation records back from a ``mutants.jsonl`` artifact."""
 
-    records: list[MutationRecord] = []
-    with path.open("r", encoding="utf-8") as file:
-        for line_number, line in enumerate(file, start=1):
-            if not line.strip():
-                continue
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError as exc:
-                raise ValueError(
-                    f"mutants.jsonl is not valid JSONL: line {line_number}."
-                ) from exc
-            if not isinstance(row, dict):
-                raise ValueError(
-                    f"mutants.jsonl row {line_number} must be a JSON object."
-                )
-            records.append(MutationRecord.from_dict(row))
-    return records
+    return _read_jsonl(
+        path,
+        row_label="mutants.jsonl",
+        loader=MutationRecord.from_dict,
+    )
 
 
 def write_mutation_records(path: Path, records: list[MutationRecord]) -> None:
@@ -251,6 +229,33 @@ def _mutant_id(example_id: str, rule_id: str, index: int) -> str:
     return f"{example_id}:{rule_id}:{index:02d}"
 
 
+def _read_jsonl(
+    path: Path,
+    *,
+    row_label: str,
+    loader: Callable[[dict[str, object]], RowT],
+) -> list[RowT]:
+    """Read one JSONL artifact by applying a row loader to each JSON object."""
+
+    rows: list[RowT] = []
+    with path.open("r", encoding="utf-8") as file:
+        for line_number, line in enumerate(file, start=1):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    f"{row_label} is not valid JSONL: line {line_number}."
+                ) from exc
+            if not isinstance(row, dict):
+                raise ValueError(
+                    f"{row_label} row {line_number} must be a JSON object."
+                )
+            rows.append(loader(row))
+    return rows
+
+
 def _skip_record(
     example: NormalizedExample,
     rule_id: str,
@@ -259,26 +264,24 @@ def _skip_record(
     reason: MutationSkipReason,
     *,
     metadata: dict[str, object] | None = None,
-) -> list[MutationRecord]:
+) -> MutationRecord:
     """Build a skipped mutation row for one rule attempt."""
 
-    return [
-        MutationRecord(
-            mutant_id=_mutant_id(example.example_id, rule_id, index),
-            example_id=example.example_id,
-            benchmark=example.benchmark,
-            subset=example.subset,
-            db_id=example.db_id,
-            source_id=example.source_id,
-            question=example.question,
-            rule=rule_id,
-            profile=profile,
-            status="skipped",
-            skip_reason=reason,
-            gold_sql=example.gold_sql,
-            mutant_sql=None,
-            sqlite_path=example.sqlite_path,
-            sqlite_relpath=example.sqlite_relpath,
-            metadata=dict(metadata or {}),
-        )
-    ]
+    return MutationRecord(
+        mutant_id=_mutant_id(example.example_id, rule_id, index),
+        example_id=example.example_id,
+        benchmark=example.benchmark,
+        subset=example.subset,
+        db_id=example.db_id,
+        source_id=example.source_id,
+        question=example.question,
+        rule=rule_id,
+        profile=profile,
+        status="skipped",
+        skip_reason=reason,
+        gold_sql=example.gold_sql,
+        mutant_sql=None,
+        sqlite_path=example.sqlite_path,
+        sqlite_relpath=example.sqlite_relpath,
+        metadata=dict(metadata or {}),
+    )
