@@ -28,6 +28,8 @@ class BirdAdapter(BenchmarkAdapter):
     """Normalize BIRD examples into the shared example contract."""
 
     def normalize(self, config: ExperimentConfig) -> list[NormalizedExample]:
+        """Load the configured BIRD splits and emit normalized examples."""
+
         if config.benchmark != "bird":
             raise BenchmarkError("BIRD normalizer received a non-BIRD config.")
 
@@ -59,6 +61,8 @@ class BirdAdapter(BenchmarkAdapter):
 
 
 def _splits_for_mode(mode: str | None) -> list[str]:
+    """Map a BIRD mode to the concrete split order used by the adapter."""
+
     if mode is None:
         raise BenchmarkError("bird_mode is required for benchmark 'bird'.")
     if mode == "full":
@@ -69,6 +73,8 @@ def _splits_for_mode(mode: str | None) -> list[str]:
 
 
 def _load_json_array(path: Path) -> list[dict[str, Any]]:
+    """Load a BIRD JSON file that is expected to contain an array of objects."""
+
     if not path.exists():
         raise BenchmarkError(f"Required BIRD file does not exist: {path}")
 
@@ -94,6 +100,8 @@ def _load_json_array(path: Path) -> list[dict[str, Any]]:
 
 
 def _load_schema_map(path: Path) -> dict[str, NormalizedSchema]:
+    """Build a ``db_id -> schema`` map from a BIRD ``*_tables.json`` file."""
+
     schemas: dict[str, NormalizedSchema] = {}
 
     for index, item in enumerate(_load_json_array(path)):
@@ -125,6 +133,8 @@ def _normalize_example(
     db_root: Path,
     examples_path: Path,
 ) -> NormalizedExample:
+    """Convert one raw BIRD example into the shared normalized row contract."""
+
     db_id = _required_string(raw_example, "db_id", examples_path, index)
     question = _required_string(raw_example, "question", examples_path, index)
     gold_sql = _required_string(raw_example, "SQL", examples_path, index)
@@ -188,6 +198,8 @@ def _normalize_example(
 def _required_string(
     mapping: dict[str, Any], field: str, path: Path, index: int
 ) -> str:
+    """Read a required string field from one BIRD JSON row."""
+
     value = mapping.get(field)
     if not isinstance(value, str) or not value.strip():
         raise BenchmarkError(
@@ -199,6 +211,8 @@ def _required_string(
 def _string_list(
     mapping: dict[str, Any], field: str, path: Path, index: int
 ) -> list[str]:
+    """Validate a list of strings in a BIRD schema row."""
+
     value = mapping.get(field)
     if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
         raise BenchmarkError(f"Row {index} in {path} has invalid '{field}'.")
@@ -208,6 +222,8 @@ def _string_list(
 def _primary_keys(
     mapping: dict[str, Any], field: str, path: Path, index: int
 ) -> list[int | tuple[int, ...]]:
+    """Validate simple or composite primary-key specifications."""
+
     value = mapping.get(field)
     if not isinstance(value, list):
         raise BenchmarkError(f"Row {index} in {path} has invalid '{field}'.")
@@ -235,6 +251,8 @@ def _primary_keys(
 def _int_string_pairs(
     mapping: dict[str, Any], field: str, path: Path, index: int
 ) -> list[tuple[int, str]]:
+    """Validate BIRD column-name pairs of ``[table_index, column_name]``."""
+
     value = mapping.get(field)
     if not isinstance(value, list):
         raise BenchmarkError(f"Row {index} in {path} has invalid '{field}'.")
@@ -255,6 +273,8 @@ def _int_string_pairs(
 def _int_pairs(
     mapping: dict[str, Any], field: str, path: Path, index: int
 ) -> list[tuple[int, int]]:
+    """Validate BIRD foreign-key pairs of integer column indices."""
+
     value = mapping.get(field)
     if not isinstance(value, list):
         raise BenchmarkError(f"Row {index} in {path} has invalid '{field}'.")

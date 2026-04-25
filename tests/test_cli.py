@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import json
 import time
 from pathlib import Path
 
 from typer.testing import CliRunner
 
 from sqlmt.cli import app
-from tests.helpers import write_bird_fixture, write_config
+from tests.helpers import read_jsonl, write_bird_fixture, write_config
 
 runner = CliRunner()
 
@@ -98,15 +97,15 @@ def test_cli_run_writes_normalized_output(tmp_path: Path) -> None:
     artifact = output_dir / "normalized_examples.jsonl"
     assert artifact.exists()
 
-    rows = [
-        json.loads(line) for line in artifact.read_text(encoding="utf-8").splitlines()
-    ]
+    rows = read_jsonl(artifact)
     assert len(rows) == 1
     assert rows[0]["example_id"] == "bird:dev:000000"
     assert rows[0]["schema"]["table_names"] == ["dev_table"]
 
 
-def test_cli_run_reports_skipped_unimplemented_stages(tmp_path: Path) -> None:
+def test_cli_run_writes_mutant_output_and_skips_only_later_stages(
+    tmp_path: Path,
+) -> None:
     data_root = write_bird_fixture(tmp_path)
     output_dir = tmp_path / "outputs" / "bird-dev"
     config_path = write_config(
@@ -119,7 +118,9 @@ def test_cli_run_reports_skipped_unimplemented_stages(tmp_path: Path) -> None:
     result = runner.invoke(app, ["run", "--config", str(config_path)])
 
     assert result.exit_code == 0
-    assert "Skipped unimplemented stages: mutate" in result.stdout
+    assert "Mutated" in result.stdout
+    assert output_dir.joinpath("mutants.jsonl").exists()
+    assert "mutants.jsonl" in result.stdout
 
 
 def test_cli_run_resumes_existing_normalized_output(tmp_path: Path) -> None:
@@ -193,7 +194,7 @@ def test_cli_run_rejects_unimplemented_benchmark(tmp_path: Path) -> None:
     assert not output_dir.exists()
 
 
-def test_cli_run_requires_normalize_stage(tmp_path: Path) -> None:
+def test_cli_run_requires_an_implemented_stage(tmp_path: Path) -> None:
     data_root = write_bird_fixture(tmp_path)
     output_dir = tmp_path / "outputs" / "bird-dev"
     config_path = write_config(
@@ -208,3 +209,109 @@ def test_cli_run_requires_normalize_stage(tmp_path: Path) -> None:
     assert result.exit_code == 2
     assert "No implemented stage is enabled" in result.stdout + result.stderr
     assert not output_dir.exists()
+
+
+def test_cli_run_mutate_only_uses_existing_normalized_examples(tmp_path: Path) -> None:
+    data_root = write_bird_fixture(tmp_path)
+    output_dir = tmp_path / "outputs" / "bird-dev"
+    normalize_config = write_config(
+        tmp_path / "bird-dev-normalize.yaml",
+        data_root=data_root,
+        output_dir=output_dir,
+        normalize=True,
+        mutate=False,
+    )
+    mutate_config = write_config(
+        tmp_path / "bird-dev-mutate.yaml",
+        data_root=data_root,
+        output_dir=output_dir,
+        normalize=False,
+        mutate=True,
+        resume=False,
+    )
+
+    first = runner.invoke(app, ["run", "--config", str(normalize_config)])
+    second = runner.invoke(app, ["run", "--config", str(mutate_config)])
+
+    assert first.exit_code == 0
+    assert second.exit_code == 0
+    assert output_dir.joinpath("normalized_examples.jsonl").exists()
+    assert output_dir.joinpath("mutants.jsonl").exists()
+
+
+def test_cli_run_mutate_only_requires_existing_normalized_examples(
+    tmp_path: Path,
+) -> None:
+    data_root = write_bird_fixture(tmp_path)
+    output_dir = tmp_path / "outputs" / "bird-dev"
+    config_path = write_config(
+        tmp_path / "bird-dev-mutate.yaml",
+        data_root=data_root,
+        output_dir=output_dir,
+        normalize=False,
+        mutate=True,
+        resume=False,
+    )
+
+    result = runner.invoke(app, ["run", "--config", str(config_path)])
+
+    assert result.exit_code == 2
+    assert "normalized_examples.jsonl does not exist" in result.stdout + result.stderr
+    assert not output_dir.exists()
+
+
+def test_cli_run_resumes_existing_mutants(tmp_path: Path) -> None:
+    data_root = write_bird_fixture(tmp_path)
+    output_dir = tmp_path / "outputs" / "bird-dev"
+    config_path = write_config(
+        tmp_path / "bird-dev-mutate.yaml",
+        data_root=data_root,
+        output_dir=output_dir,
+        normalize=True,
+        mutate=True,
+        resume=True,
+        overwrite=False,
+    )
+
+    first = runner.invoke(app, ["run", "--config", str(config_path)])
+
+    artifact = output_dir / "mutants.jsonl"
+    artifact_mtime = artifact.stat().st_mtime_ns
+    time.sleep(0.01)
+
+    second = runner.invoke(app, ["run", "--config", str(config_path)])
+
+    assert first.exit_code == 0
+    assert second.exit_code == 0
+    assert "Reused mutations" in second.stdout
+    assert artifact.stat().st_mtime_ns == artifact_mtime
+
+
+def test_cli_run_existing_mutants_require_resume_or_overwrite(tmp_path: Path) -> None:
+    data_root = write_bird_fixture(tmp_path)
+    output_dir = tmp_path / "outputs" / "bird-dev"
+    first_config = write_config(
+        tmp_path / "bird-dev-first.yaml",
+        data_root=data_root,
+        output_dir=output_dir,
+        normalize=True,
+        mutate=True,
+        resume=True,
+        overwrite=False,
+    )
+    second_config = write_config(
+        tmp_path / "bird-dev-second.yaml",
+        data_root=data_root,
+        output_dir=output_dir,
+        normalize=False,
+        mutate=True,
+        resume=False,
+        overwrite=False,
+    )
+
+    first = runner.invoke(app, ["run", "--config", str(first_config)])
+    second = runner.invoke(app, ["run", "--config", str(second_config)])
+
+    assert first.exit_code == 0
+    assert second.exit_code == 2
+    assert "Mutation outputs already exist" in second.stdout + second.stderr

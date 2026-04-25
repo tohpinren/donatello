@@ -16,6 +16,13 @@ def test_valid_config_loading() -> None:
     assert config.stages.enabled() == ["normalize"]
 
 
+def test_mutation_smoke_config_loading() -> None:
+    config = load_config(Path("configs/smoke/bird-dev-mutate.yaml"))
+
+    assert config.experiment_name == "bird-dev-mutate-smoke"
+    assert config.stages.enabled() == ["normalize", "mutate"]
+
+
 def test_train_bird_mode_is_accepted(tmp_path: Path) -> None:
     path = tmp_path / "config.yaml"
     path.write_text(

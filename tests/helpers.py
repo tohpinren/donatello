@@ -1,10 +1,17 @@
+"""Test fixtures shared across normalization and mutation suites."""
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
+
+from sqlmt.models import NormalizedExample, NormalizedSchema
 
 
 def write_bird_fixture(root: Path) -> Path:
+    """Create a tiny extracted BIRD-style fixture tree under ``root``."""
+
     data_root = root / "bird"
     _write_split(
         data_root=data_root,
@@ -59,6 +66,112 @@ def write_bird_fixture(root: Path) -> Path:
     return data_root
 
 
+def make_company_schema() -> NormalizedSchema:
+    """Return a multi-table schema used by rule-level mutation tests."""
+
+    return _schema_from_tables(
+        {
+            "employees": [
+                ("id", "integer"),
+                ("name", "text"),
+                ("salary", "integer"),
+                ("department_id", "integer"),
+                ("manager_id", "integer"),
+                ("office_id", "integer"),
+                ("email", "text"),
+            ],
+            "departments": [
+                ("id", "integer"),
+                ("name", "text"),
+                ("region", "text"),
+                ("budget", "integer"),
+                ("manager_id", "integer"),
+            ],
+            "projects": [
+                ("id", "integer"),
+                ("department_id", "integer"),
+                ("name", "text"),
+                ("budget", "integer"),
+            ],
+            "offices": [
+                ("id", "integer"),
+                ("city", "text"),
+            ],
+        },
+        primary_keys=[1, 8, 14, 19],
+        foreign_keys=[(4, 8), (6, 19), (15, 8)],
+    )
+
+
+def make_single_table_schema() -> NormalizedSchema:
+    """Return a single-table schema for minimal mutation fixtures."""
+
+    return _schema_from_tables(
+        {
+            "employees": [
+                ("id", "integer"),
+                ("name", "text"),
+                ("salary", "integer"),
+                ("manager_id", "integer"),
+            ]
+        },
+        primary_keys=[1],
+        foreign_keys=[],
+    )
+
+
+def make_normalized_example(
+    sql: str,
+    *,
+    schema: NormalizedSchema | None = None,
+    example_id: str = "bird:dev:000000",
+    benchmark: str = "bird",
+    subset: str = "dev",
+    source_id: str | None = "fixture-1",
+    db_id: str = "company",
+    question: str = "fixture question",
+    sqlite_path: str = "/tmp/company.sqlite",
+    sqlite_relpath: str = "dev/dev_databases/company/company.sqlite",
+    metadata: dict[str, object] | None = None,
+) -> NormalizedExample:
+    """Build a normalized example with sensible fixture defaults."""
+
+    return NormalizedExample(
+        example_id=example_id,
+        benchmark=benchmark,
+        subset=subset,
+        source_id=source_id,
+        db_id=db_id,
+        question=question,
+        gold_sql=sql,
+        sqlite_path=sqlite_path,
+        sqlite_relpath=sqlite_relpath,
+        schema=schema or make_company_schema(),
+        metadata=dict(metadata or {}),
+    )
+
+
+def write_normalized_examples(path: Path, examples: list[NormalizedExample]) -> Path:
+    """Persist normalized examples as JSONL for pipeline tests."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as file:
+        for example in examples:
+            file.write(json.dumps(example.to_dict(), ensure_ascii=True))
+            file.write("\n")
+    return path
+
+
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    """Read a JSONL file into dictionaries for assertions."""
+
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
 def write_config(
     path: Path,
     *,
@@ -71,6 +184,8 @@ def write_config(
     resume: bool = True,
     overwrite: bool = False,
 ) -> Path:
+    """Write a minimal experiment config tailored for integration tests."""
+
     bird_mode_line = f"bird_mode: {bird_mode}\n" if bird_mode is not None else ""
     path.write_text(
         f"""
@@ -101,6 +216,8 @@ def _write_split(
     examples: list[dict[str, object]],
     tables: list[dict[str, object]],
 ) -> None:
+    """Write one BIRD split and its extracted SQLite placeholder files."""
+
     split_dir = data_root / split
     split_dir.mkdir(parents=True, exist_ok=True)
 
@@ -115,3 +232,33 @@ def _write_split(
         db_path = database_dir / db_id
         db_path.mkdir(parents=True, exist_ok=True)
         (db_path / f"{db_id}.sqlite").write_bytes(b"")
+
+
+def _schema_from_tables(
+    tables: dict[str, list[tuple[str, str]]],
+    *,
+    primary_keys: list[int | tuple[int, ...]],
+    foreign_keys: list[tuple[int, int]],
+) -> NormalizedSchema:
+    """Construct a ``NormalizedSchema`` from compact table definitions."""
+
+    table_names = list(tables)
+    column_names: list[tuple[int, str]] = [(-1, "*")]
+    column_names_original: list[tuple[int, str]] = [(-1, "*")]
+    column_types: list[str] = ["text"]
+
+    for table_index, (_table_name, columns) in enumerate(tables.items()):
+        for column_name, column_type in columns:
+            column_names.append((table_index, column_name))
+            column_names_original.append((table_index, column_name))
+            column_types.append(column_type)
+
+    return NormalizedSchema(
+        table_names=table_names,
+        table_names_original=table_names.copy(),
+        column_names=column_names,
+        column_names_original=column_names_original,
+        column_types=column_types,
+        primary_keys=primary_keys,
+        foreign_keys=foreign_keys,
+    )

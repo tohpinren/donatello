@@ -1,4 +1,4 @@
-"""Pipeline orchestration for dry runs and benchmark normalization."""
+"""Pipeline orchestration for dry runs, normalization, and mutation generation."""
 
 from __future__ import annotations
 
@@ -9,7 +9,14 @@ from pathlib import Path
 from sqlmt.artifacts import ExperimentArtifacts, artifacts_for
 from sqlmt.benchmarks import BenchmarkError, normalize_examples
 from sqlmt.config import ExperimentConfig
-from sqlmt.models import NormalizationSummary, NormalizedExample
+from sqlmt.models import MutationSummary, NormalizationSummary, NormalizedExample
+from sqlmt.mutation.generator import (
+    generate_mutations,
+    read_mutation_records,
+    read_normalized_examples,
+    summarize_mutations,
+    write_mutation_records,
+)
 
 
 class PipelineError(RuntimeError):
@@ -18,6 +25,8 @@ class PipelineError(RuntimeError):
 
 @dataclass(frozen=True)
 class DryRunPlan:
+    """Resolved plan shown to the user for a side-effect-free dry run."""
+
     experiment_name: str
     output_dir: str
     enabled_stages: list[str]
@@ -25,6 +34,8 @@ class DryRunPlan:
 
 
 def build_dry_run_plan(config: ExperimentConfig) -> DryRunPlan:
+    """Resolve artifacts and enabled stages without touching the filesystem."""
+
     artifacts = artifacts_for(config.output_dir)
     return DryRunPlan(
         experiment_name=config.experiment_name,
@@ -35,6 +46,8 @@ def build_dry_run_plan(config: ExperimentConfig) -> DryRunPlan:
 
 
 def prepare_run(config: ExperimentConfig) -> ExperimentArtifacts:
+    """Create the artifact root and return the resolved path wrapper."""
+
     artifacts = artifacts_for(config.output_dir)
     artifacts.ensure_base_dirs()
     return artifacts
@@ -43,14 +56,75 @@ def prepare_run(config: ExperimentConfig) -> ExperimentArtifacts:
 def preflight_run(config: ExperimentConfig) -> None:
     """Reject unsupported or no-op runs before creating output artifacts."""
 
-    if not config.stages.normalize:
-        raise PipelineError(
-            "No implemented stage is enabled. Set stages.normalize: true."
-        )
     if config.benchmark != "bird":
         raise PipelineError(
             f"Normalization for benchmark '{config.benchmark}' is not implemented yet."
         )
+    if not config.stages.normalize and not config.stages.mutate:
+        raise PipelineError(
+            "No implemented stage is enabled. "
+            "Set stages.normalize: true or stages.mutate: true."
+        )
+    if config.stages.mutate and not config.stages.normalize:
+        artifacts = artifacts_for(config.output_dir)
+        if not artifacts.normalized_examples.exists():
+            raise PipelineError(
+                "Mutation generation requires normalized_examples.jsonl when "
+                "stages.normalize is false, but normalized_examples.jsonl "
+                "does not exist."
+            )
+
+
+def run_mutation_generation(
+    config: ExperimentConfig,
+    *,
+    config_path: Path,
+    artifacts: ExperimentArtifacts,
+) -> MutationSummary:
+    """Execute or resume mutation generation from normalized examples."""
+
+    if not artifacts.normalized_examples.exists():
+        raise PipelineError(
+            "Mutation generation requires normalized_examples.jsonl, "
+            "but it does not exist."
+        )
+
+    if artifacts.mutants.exists():
+        if config.overwrite:
+            pass
+        elif config.resume:
+            return _summarize_existing_mutations(config, artifacts)
+        raise PipelineError(
+            "Mutation outputs already exist: mutants.jsonl. "
+            "Set resume: true to reuse them or overwrite: true to replace them."
+        )
+
+    try:
+        examples = read_normalized_examples(artifacts.normalized_examples)
+    except ValueError as exc:
+        raise PipelineError(str(exc)) from exc
+
+    if config.overwrite or not artifacts.config_snapshot.exists():
+        _write_config_snapshot(config_path, artifacts.config_snapshot)
+
+    records = generate_mutations(
+        examples,
+        profile=config.mutation_profile,
+    )
+    write_mutation_records(artifacts.mutants, records)
+
+    skipped_stages = [
+        stage
+        for stage in config.stages.enabled()
+        if stage not in {"normalize", "mutate"}
+    ]
+    return summarize_mutations(
+        records,
+        benchmark=config.benchmark,
+        profile=config.mutation_profile,
+        output_path=artifacts.mutants,
+        skipped_stages=skipped_stages,
+    )
 
 
 def run_normalization(
@@ -103,10 +177,14 @@ def run_normalization(
 
 
 def _write_config_snapshot(source: Path, target: Path) -> None:
+    """Copy the user-supplied config into the experiment artifact directory."""
+
     target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
 
 
 def _write_examples(path: Path, examples: list[NormalizedExample]) -> None:
+    """Write normalized examples as JSONL in source order."""
+
     with path.open("w", encoding="utf-8") as file:
         for example in examples:
             file.write(json.dumps(example.to_dict(), ensure_ascii=True))
@@ -118,6 +196,8 @@ def _summarize_existing_normalization(
     artifacts: ExperimentArtifacts,
     mode: str,
 ) -> NormalizationSummary:
+    """Summarize a previously written normalization artifact for resume mode."""
+
     if not artifacts.normalized_examples.exists():
         raise PipelineError(
             "resume is true but normalized_examples.jsonl does not exist."
@@ -153,6 +233,32 @@ def _summarize_existing_normalization(
         example_count=example_count,
         database_count=len(db_ids),
         output_path=str(artifacts.normalized_examples),
+        resumed=True,
+        skipped_stages=skipped_stages,
+    )
+
+
+def _summarize_existing_mutations(
+    config: ExperimentConfig,
+    artifacts: ExperimentArtifacts,
+) -> MutationSummary:
+    """Summarize an existing mutation artifact when resume mode is enabled."""
+
+    try:
+        records = read_mutation_records(artifacts.mutants)
+    except ValueError as exc:
+        raise PipelineError(str(exc)) from exc
+
+    skipped_stages = [
+        stage
+        for stage in config.stages.enabled()
+        if stage not in {"normalize", "mutate"}
+    ]
+    return summarize_mutations(
+        records,
+        benchmark=config.benchmark,
+        profile=config.mutation_profile,
+        output_path=artifacts.mutants,
         resumed=True,
         skipped_stages=skipped_stages,
     )
