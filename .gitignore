@@ -210,3 +210,8 @@ __marimo__/
 outputs/*
 !outputs/.gitkeep
 configs/local/*.yaml
+/context/
+/data/
+/.aider.*
+/.aider.tags.cache.v4/
+/design.md
