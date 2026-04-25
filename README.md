@@ -64,6 +64,34 @@ You can also run the setup steps directly:
 uv sync
 uv run sqlmt --help
 uv run sqlmt check-env
+uv run sqlmt check-env --config configs/smoke/bird-dev.yaml
+```
+
+### VeriEQL Setup
+
+VeriEQL is an external solver dependency and is not vendored into this
+repository. Keep it in its own checkout and Python environment.
+
+Local development setup:
+
+```bash
+git clone https://github.com/VeriEQL/VeriEQL.git /Users/tohpinren/Repos/VeriEQL
+python3.11 -m venv /Users/tohpinren/Repos/VeriEQL/.venv
+/Users/tohpinren/Repos/VeriEQL/.venv/bin/pip install -r /Users/tohpinren/Repos/VeriEQL/requirements.txt
+
+export VERIEQL_ROOT=/Users/tohpinren/Repos/VeriEQL
+export VERIEQL_PYTHON=/Users/tohpinren/Repos/VeriEQL/.venv/bin/python
+```
+
+Remote server setup follows the same pattern:
+
+```bash
+git clone https://github.com/VeriEQL/VeriEQL.git ~/tools/VeriEQL
+python3.11 -m venv ~/venvs/verieql
+~/venvs/verieql/bin/pip install -r ~/tools/VeriEQL/requirements.txt
+
+export VERIEQL_ROOT=~/tools/VeriEQL
+export VERIEQL_PYTHON=~/venvs/verieql/bin/python
 ```
 
 ## Benchmark Data Setup
@@ -159,7 +187,7 @@ Main fields:
 - `output_dir`: artifact directory for the run
 - `mutation_profile`: currently `canonical`
 - `resume` / `overwrite`: artifact reuse behavior
-- `stages`: enable `normalize` and `mutate` today
+- `stages`: enable `normalize`, `mutate`, and `equivalence` today
 
 Example local config:
 
@@ -177,14 +205,60 @@ overwrite: false
 stages:
   normalize: true
   mutate: true
-  equivalence: false
+  equivalence: true
   execute: false
   counterexamples: false
   augment: false
   report: false
+
+timeouts:
+  verieql_seconds: 120
+  sqldriller_seconds: 300
+
+tools:
+  verieql_path: ${VERIEQL_ROOT}
+  verieql_python: ${VERIEQL_PYTHON}
+  sqldriller_path: null
 ```
 
-Use [`configs/templates/local.yaml.example`](configs/templates/local.yaml.example) as the starting point for machine-specific configs.
+Use [`configs/templates/local.yaml.example`](configs/templates/local.yaml.example)
+as the starting point for machine-specific configs.
+
+## Remote Experiment Runs
+
+The repository is designed for SSH-based runs on servers such as the NUS
+machine. Keep benchmark data, solver checkouts, generated databases, and output
+artifacts outside git.
+
+Typical remote setup:
+
+```bash
+git clone <repo-url> ~/sql-mutation-testing
+cd ~/sql-mutation-testing
+./scripts/bootstrap.sh
+
+export BIRD_ROOT=~/data/sqlmt/bird
+export SQLMT_OUTPUT_ROOT=~/scratch/sqlmt-outputs
+export VERIEQL_ROOT=~/tools/VeriEQL
+export VERIEQL_PYTHON=~/venvs/verieql/bin/python
+
+uv run sqlmt check-env --config configs/templates/local.yaml.example
+```
+
+For long-running experiments, use a persistent shell:
+
+```bash
+tmux new -s sqlmt
+uv run sqlmt run --config configs/local/bird-dev-verieql.yaml
+```
+
+Or run detached with `nohup`:
+
+```bash
+nohup uv run sqlmt run --config configs/local/bird-dev-verieql.yaml > run.out 2>&1 &
+```
+
+Set `resume: true` to reuse completed stage artifacts after an interrupted run.
 
 ## Artifacts
 
@@ -199,12 +273,19 @@ outputs/
     run.log
     normalized_examples.jsonl
     mutants.jsonl
+    equivalence.jsonl
+    execution.jsonl
+    counterexamples/
+    augmented_databases/
+    report.md
 ```
 
 Current stage behavior:
 
 - normalization writes `normalized_examples.jsonl`
 - mutation generation reads `normalized_examples.jsonl` and writes `mutants.jsonl`
+- equivalence filtering reads `normalized_examples.jsonl` and `mutants.jsonl`,
+  runs VeriEQL, and writes `equivalence.jsonl`
 - `resume: true` reuses existing artifacts
 - `overwrite: true` replaces them
 
