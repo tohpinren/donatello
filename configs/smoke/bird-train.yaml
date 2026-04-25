@@ -23,4 +23,5 @@ timeouts:
 
 tools:
   verieql_path: null
+  verieql_python: null
   sqldriller_path: null

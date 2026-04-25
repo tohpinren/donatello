@@ -17,6 +17,7 @@ from sqlmt.pipeline import (
     build_dry_run_plan,
     preflight_run,
     prepare_run,
+    run_equivalence_filtering,
     run_mutation_generation,
     run_normalization,
 )
@@ -53,7 +54,20 @@ def main(
 
 
 @app.command("check-env")
-def check_env() -> None:
+def check_env(
+    config: Annotated[
+        Path | None,
+        typer.Option(
+            "--config",
+            "-c",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            help="Optional experiment config for path and tool checks.",
+        ),
+    ] = None,
+) -> None:
     """Check local foundation dependencies and external tool availability."""
 
     checks = {
@@ -73,6 +87,49 @@ def check_env() -> None:
         else:
             typer.echo(f"FAIL {name}: not found")
             raise typer.Exit(code=1)
+
+    if config is None:
+        return
+
+    try:
+        loaded = load_config(config)
+    except ConfigError as exc:
+        typer.echo(f"FAIL config: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    _check_path("data_root", loaded.data_root, must_exist=True)
+    output_parent = loaded.output_dir.parent
+    _check_path("output_parent", output_parent, must_exist=output_parent.exists())
+    disk_usage = shutil.disk_usage(
+        output_parent if output_parent.exists() else Path(".")
+    )
+    typer.echo(f"OK   output_disk_free: {disk_usage.free // (1024 * 1024)} MiB")
+    if loaded.tools.verieql_path is not None:
+        _check_path("tools.verieql_path", loaded.tools.verieql_path, must_exist=True)
+    if loaded.tools.verieql_python is not None:
+        _check_path(
+            "tools.verieql_python",
+            loaded.tools.verieql_python,
+            must_exist=True,
+        )
+    if loaded.tools.sqldriller_path is not None:
+        _check_path(
+            "tools.sqldriller_path",
+            loaded.tools.sqldriller_path,
+            must_exist=True,
+        )
+
+
+def _check_path(name: str, path: Path, *, must_exist: bool) -> None:
+    """Print a simple environment path check."""
+
+    if must_exist and path.exists():
+        typer.echo(f"OK   {name}: {path}")
+    elif must_exist:
+        typer.echo(f"FAIL {name}: {path} does not exist")
+        raise typer.Exit(code=1)
+    else:
+        typer.echo(f"WARN {name}: {path} does not exist")
 
 
 @config_app.command("validate")
@@ -152,6 +209,7 @@ def run(
 
     normalization_summary = None
     mutation_summary = None
+    equivalence_summary = None
 
     try:
         if loaded.stages.normalize:
@@ -164,6 +222,11 @@ def run(
             mutation_summary = run_mutation_generation(
                 loaded,
                 config_path=config,
+                artifacts=artifacts,
+            )
+        if loaded.stages.equivalence:
+            equivalence_summary = run_equivalence_filtering(
+                loaded,
                 artifacts=artifacts,
             )
     except PipelineError as exc:
@@ -190,13 +253,33 @@ def run(
         )
         typer.echo(f"Wrote: {mutation_summary.output_path}")
 
+    if equivalence_summary is not None:
+        action = (
+            "Reused equivalence"
+            if equivalence_summary.resumed
+            else "Filtered equivalence"
+        )
+        typer.echo(
+            f"{action} for {equivalence_summary.checked_count} generated mutants: "
+            f"{equivalence_summary.proven_equivalent_count} proven equivalent, "
+            f"{equivalence_summary.likely_non_equivalent_count} likely "
+            f"non-equivalent, {equivalence_summary.timeout_count} timeout, "
+            f"{equivalence_summary.unsupported_count} unsupported, "
+            f"{equivalence_summary.error_count} error."
+        )
+        typer.echo(f"Wrote: {equivalence_summary.output_path}")
+
     skipped_stages = (
-        mutation_summary.skipped_stages
-        if mutation_summary is not None
+        equivalence_summary.skipped_stages
+        if equivalence_summary is not None
         else (
-            normalization_summary.skipped_stages
-            if normalization_summary is not None
-            else []
+            mutation_summary.skipped_stages
+            if mutation_summary is not None
+            else (
+                normalization_summary.skipped_stages
+                if normalization_summary is not None
+                else []
+            )
         )
     )
     if skipped_stages:
