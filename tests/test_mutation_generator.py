@@ -325,6 +325,30 @@ def test_mutation_generation_caps_each_rule_at_three_generated_mutants() -> None
     assert len(generated) == 3
 
 
+def test_mutation_generation_cap_is_overrideable() -> None:
+    example = make_normalized_example("SELECT 99")
+    rule = MutationRule(
+        rule_id="test_many_candidates_override",
+        apply=lambda example, tree: [
+            MutationCandidate(
+                mutant_sql=f"SELECT {index}",
+                metadata={"site_index": index},
+            )
+            for index in range(5)
+        ],
+    )
+
+    records = generate_mutations(
+        [example],
+        rules=[rule],
+        profile="test",
+        max_generated_per_rule=2,
+    )
+
+    generated = [record for record in records if record.status == "generated"]
+    assert len(generated) == 2
+
+
 def test_invalid_candidate_from_one_rule_does_not_stop_other_rules() -> None:
     example = make_normalized_example("SELECT e.name FROM employees e")
     bad_rule = MutationRule(

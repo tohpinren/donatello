@@ -16,12 +16,15 @@ from sqlmt.models import (
 from sqlmt.mutation.helpers import normalize_sql, parse_sql, serialize_sql
 from sqlmt.mutation.profile import MutationRule, ensure_rule_sequence
 
+DEFAULT_MAX_GENERATED_MUTANTS_PER_RULE = 3
+
 
 def generate_mutations(
     examples: list[NormalizedExample],
     *,
     rules: list[MutationRule] | None = None,
     profile: str = "canonical",
+    max_generated_per_rule: int = DEFAULT_MAX_GENERATED_MUTANTS_PER_RULE,
 ) -> list[MutationRecord]:
     ordered_rules = ensure_rule_sequence(rules)
     records: list[MutationRecord] = []
@@ -75,7 +78,7 @@ def generate_mutations(
             generated_for_rule = 0
             emitted_any = False
             for attempt_index, candidate in enumerate(candidates):
-                if generated_for_rule >= 3:
+                if generated_for_rule >= max_generated_per_rule:
                     break
 
                 emitted_any = True

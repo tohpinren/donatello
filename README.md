@@ -221,6 +221,12 @@ Each rule either:
 - emits one or more SQLGlot-validated mutants, or
 - records a clean skip reason such as `rule_not_applicable`, `duplicate_sql`, or `same_as_gold`
 
+The generator currently keeps at most `3` generated mutants per rule for each
+gold SQL. That default is centralized in
+`src/sqlmt/mutation/generator.py` as
+`DEFAULT_MAX_GENERATED_MUTANTS_PER_RULE`, and `generate_mutations(...)` also
+accepts `max_generated_per_rule=...` if you want to override it in code.
+
 ## CLI
 
 ```bash
