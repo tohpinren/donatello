@@ -36,17 +36,23 @@ CANONICAL_RULE_IDS = (
 
 @dataclass(frozen=True)
 class MutationCandidate:
+    """One raw mutant candidate emitted by a mutation rule."""
+
     mutant_sql: str
     metadata: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class MutationRule:
+    """A named mutation rule callable used by the generator."""
+
     rule_id: str
     apply: RuleApply
 
 
 def canonical_rules() -> list[MutationRule]:
+    """Return the canonical 19-rule mutation profile in fixed order."""
+
     from sqlmt.mutation.rules_a import RULES_A
     from sqlmt.mutation.rules_b import RULES_B
     from sqlmt.mutation.rules_c import RULES_C
@@ -58,4 +64,6 @@ def canonical_rules() -> list[MutationRule]:
 
 
 def ensure_rule_sequence(rules: Sequence[MutationRule] | None) -> list[MutationRule]:
+    """Normalize an optional rule sequence into a concrete list."""
+
     return canonical_rules() if rules is None else list(rules)

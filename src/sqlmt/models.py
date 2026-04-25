@@ -19,6 +19,8 @@ class NormalizedSchema:
     foreign_keys: list[tuple[int, int]]
 
     def to_dict(self) -> dict[str, object]:
+        """Serialize the schema into the JSONL artifact shape."""
+
         return {
             "table_names": self.table_names,
             "table_names_original": self.table_names_original,
@@ -31,6 +33,8 @@ class NormalizedSchema:
 
     @classmethod
     def from_dict(cls, row: dict[str, Any]) -> NormalizedSchema:
+        """Parse a schema row read back from a JSON artifact."""
+
         return cls(
             table_names=[str(value) for value in row["table_names"]],
             table_names_original=[str(value) for value in row["table_names_original"]],
@@ -70,6 +74,8 @@ class NormalizedExample:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
+        """Serialize one normalized example for artifact storage."""
+
         return {
             "example_id": self.example_id,
             "benchmark": self.benchmark,
@@ -86,6 +92,8 @@ class NormalizedExample:
 
     @classmethod
     def from_dict(cls, row: dict[str, Any]) -> NormalizedExample:
+        """Parse a normalized example previously written to JSONL."""
+
         return cls(
             example_id=str(row["example_id"]),
             benchmark=str(row["benchmark"]),
@@ -128,6 +136,8 @@ MutationSkipReason = Literal[
 
 @dataclass(frozen=True)
 class MutationRecord:
+    """One generated or skipped mutation attempt for a gold SQL query."""
+
     mutant_id: str
     example_id: str
     benchmark: str
@@ -146,6 +156,8 @@ class MutationRecord:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
+        """Serialize the mutation record into the persisted JSONL shape."""
+
         return {
             "mutant_id": self.mutant_id,
             "example_id": self.example_id,
@@ -167,6 +179,8 @@ class MutationRecord:
 
     @classmethod
     def from_dict(cls, row: dict[str, Any]) -> MutationRecord:
+        """Parse a mutation record read back from ``mutants.jsonl``."""
+
         return cls(
             mutant_id=str(row["mutant_id"]),
             example_id=str(row["example_id"]),
@@ -193,6 +207,8 @@ class MutationRecord:
 
 @dataclass(frozen=True)
 class MutationSummary:
+    """High-level counts and output metadata for a mutation run."""
+
     benchmark: str
     profile: str
     generated_count: int

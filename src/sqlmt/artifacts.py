@@ -14,38 +14,56 @@ class ExperimentArtifacts:
 
     @property
     def config_snapshot(self) -> Path:
+        """Return the copied config file stored alongside a run."""
+
         return self.root / "config.yaml"
 
     @property
     def run_log(self) -> Path:
+        """Return the path of the run-local log file."""
+
         return self.root / "run.log"
 
     @property
     def normalized_examples(self) -> Path:
+        """Return the path of the normalized benchmark artifact."""
+
         return self.root / "normalized_examples.jsonl"
 
     @property
     def mutants(self) -> Path:
+        """Return the path of the mutation-generation artifact."""
+
         return self.root / "mutants.jsonl"
 
     @property
     def equivalence(self) -> Path:
+        """Return the reserved path for equivalence-filtering results."""
+
         return self.root / "equivalence.jsonl"
 
     @property
     def execution(self) -> Path:
+        """Return the reserved path for SQLite execution results."""
+
         return self.root / "execution.jsonl"
 
     @property
     def counterexamples_dir(self) -> Path:
+        """Return the directory reserved for generated counterexamples."""
+
         return self.root / "counterexamples"
 
     @property
     def augmented_databases_dir(self) -> Path:
+        """Return the directory reserved for augmented database copies."""
+
         return self.root / "augmented_databases"
 
     @property
     def report(self) -> Path:
+        """Return the reserved path for the top-level report artifact."""
+
         return self.root / "report.md"
 
     def ensure_base_dirs(self) -> None:

@@ -33,6 +33,8 @@ class ConfigError(ValueError):
 
 @dataclass(frozen=True)
 class StageConfig:
+    """Boolean stage switches for one experiment run."""
+
     normalize: bool = True
     mutate: bool = True
     equivalence: bool = True
@@ -42,23 +44,31 @@ class StageConfig:
     report: bool = True
 
     def enabled(self) -> list[str]:
+        """Return enabled stage names in declaration order."""
+
         return [name for name, enabled in vars(self).items() if enabled]
 
 
 @dataclass(frozen=True)
 class TimeoutConfig:
+    """Timeout settings for external tools used in later stages."""
+
     verieql_seconds: int = 120
     sqldriller_seconds: int = 300
 
 
 @dataclass(frozen=True)
 class ToolConfig:
+    """Optional paths to external non-Python tools."""
+
     verieql_path: Path | None = None
     sqldriller_path: Path | None = None
 
 
 @dataclass(frozen=True)
 class ExperimentConfig:
+    """Validated experiment settings consumed by the pipeline."""
+
     experiment_name: str
     benchmark: Benchmark
     bird_mode: BirdMode | None
@@ -112,6 +122,8 @@ def load_config(path: Path | str) -> ExperimentConfig:
 
 
 def _read_yaml(path: Path) -> dict[str, object]:
+    """Read a YAML config file into a string-keyed mapping."""
+
     if not path.exists():
         raise ConfigError(f"Config file does not exist: {path}")
 
@@ -125,6 +137,8 @@ def _read_yaml(path: Path) -> dict[str, object]:
 
 
 def _validate(config: ExperimentConfig) -> None:
+    """Validate cross-field constraints after parsing a config."""
+
     if config.workers < 1:
         raise ConfigError("workers must be at least 1.")
     if config.timeouts.verieql_seconds < 1:
@@ -138,6 +152,8 @@ def _validate(config: ExperimentConfig) -> None:
 def _mapping(
     value: object, name: str, *, allow_none: bool = False
 ) -> dict[str, object]:
+    """Validate and normalize a YAML mapping node."""
+
     if value is None and allow_none:
         return {}
     if not isinstance(value, dict):
@@ -152,6 +168,8 @@ def _mapping(
 
 
 def _str(mapping: dict[str, object], name: str, default: str | None = None) -> str:
+    """Read a required non-empty string field from a mapping."""
+
     value = mapping.get(name, default)
     if not isinstance(value, str) or not value.strip():
         raise ConfigError(f"{name} must be a non-empty string.")
@@ -164,6 +182,8 @@ def _choice(
     allowed: set[str],
     default: str | None = None,
 ) -> str:
+    """Read a string field constrained to a finite set of values."""
+
     value = _str(mapping, name, default)
     if value not in allowed:
         raise ConfigError(f"{name} must be one of: {', '.join(sorted(allowed))}.")
@@ -171,6 +191,8 @@ def _choice(
 
 
 def _bird_mode(mapping: dict[str, object], benchmark: Benchmark) -> BirdMode | None:
+    """Read the BIRD mode while allowing non-BIRD configs to omit it."""
+
     if benchmark == "bird":
         return cast(BirdMode, _choice(mapping, "bird_mode", BIRD_MODES))
 
@@ -185,10 +207,14 @@ def _bird_mode(mapping: dict[str, object], benchmark: Benchmark) -> BirdMode | N
 
 
 def _path(mapping: dict[str, object], name: str) -> Path:
+    """Expand environment variables and `~` in a required path field."""
+
     return Path(os.path.expandvars(_str(mapping, name))).expanduser()
 
 
 def _maybe_path(value: object) -> Path | None:
+    """Normalize an optional path-like config value."""
+
     if value is None:
         return None
     if not isinstance(value, str) or not value.strip():
@@ -197,6 +223,8 @@ def _maybe_path(value: object) -> Path | None:
 
 
 def _int(mapping: dict[str, object], name: str, default: int) -> int:
+    """Read an integer field while rejecting booleans."""
+
     value = mapping.get(name, default)
     if isinstance(value, bool) or not isinstance(value, int):
         raise ConfigError(f"{name} must be an integer.")
@@ -204,6 +232,8 @@ def _int(mapping: dict[str, object], name: str, default: int) -> int:
 
 
 def _bool(mapping: dict[str, object], name: str, default: bool) -> bool:
+    """Read a strict boolean field from a mapping."""
+
     value = mapping.get(name, default)
     if not isinstance(value, bool):
         raise ConfigError(f"{name} must be true or false.")

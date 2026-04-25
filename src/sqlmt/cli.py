@@ -30,6 +30,8 @@ app.add_typer(config_app, name="config")
 
 
 def _version_callback(value: bool) -> None:
+    """Print the package version and stop command execution."""
+
     if value:
         typer.echo(f"sqlmt {__version__}")
         raise typer.Exit

@@ -29,6 +29,8 @@ def b_join_miss(
     example: NormalizedExample,
     tree: exp.Expression,
 ) -> list[MutationCandidate]:
+    """Drop a join condition to simulate a missing join predicate."""
+
     candidates: list[MutationCandidate] = []
     for site_index, _join in enumerate(
         matching_nodes(
@@ -61,6 +63,8 @@ def b_from_unused_tv(
     example: NormalizedExample,
     tree: exp.Expression,
 ) -> list[MutationCandidate]:
+    """Add an unused table as a deterministic ``CROSS JOIN``."""
+
     select = top_level_select(tree)
     if select is None:
         return []
@@ -90,6 +94,8 @@ def b_subq_scope_typo(
     example: NormalizedExample,
     tree: exp.Expression,
 ) -> list[MutationCandidate]:
+    """Rewrite a correlated reference to the wrong local alias in a subquery."""
+
     candidates: list[MutationCandidate] = []
     subqueries = _correlated_subqueries(tree)
 
@@ -145,6 +151,8 @@ def b_like_nowildcard(
     example: NormalizedExample,
     tree: exp.Expression,
 ) -> list[MutationCandidate]:
+    """Swap ``LIKE`` and ``=`` when the compared literal has no wildcard."""
+
     candidates: list[MutationCandidate] = []
 
     for site_index, _like in enumerate(
@@ -229,6 +237,8 @@ def b_wildcard_wrong_op(
     example: NormalizedExample,
     tree: exp.Expression,
 ) -> list[MutationCandidate]:
+    """Confuse wildcard string matching with equality semantics."""
+
     candidates: list[MutationCandidate] = []
 
     for site_index, _like in enumerate(
@@ -312,6 +322,8 @@ def b_domain_mismatch_comp(
     example: NormalizedExample,
     tree: exp.Expression,
 ) -> list[MutationCandidate]:
+    """Swap one comparison side with a different same-typed visible column."""
+
     select = top_level_select(tree)
     if select is None:
         return []
@@ -382,6 +394,8 @@ def b_domain_mismatch_comp(
 
 
 def _correlated_subqueries(expression: exp.Expression) -> list[exp.Select]:
+    """Return nested selects that reference at least one outer-scope alias."""
+
     root = expression if isinstance(expression, exp.Select) else None
     return [
         select

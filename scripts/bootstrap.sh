@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Bootstrap the local Python environment with the pinned uv project state.
 set -euo pipefail
 
 if ! command -v uv >/dev/null 2>&1; then

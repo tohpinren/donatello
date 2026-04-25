@@ -47,6 +47,8 @@ def c_pred_ror(
     example: NormalizedExample,
     tree: exp.Expression,
 ) -> list[MutationCandidate]:
+    """Replace comparison operators with deterministic relational alternatives."""
+
     candidates: list[MutationCandidate] = []
     for site_index, comparison in enumerate(comparison_nodes(tree)):
         replacement_types = RELATIONAL_REPLACEMENTS.get(type(comparison), [])
@@ -76,6 +78,8 @@ def c_pred_lcr(
     example: NormalizedExample,
     tree: exp.Expression,
 ) -> list[MutationCandidate]:
+    """Swap top-level logical connectors between ``AND`` and ``OR``."""
+
     candidates: list[MutationCandidate] = []
 
     for site_index, logical in enumerate(
@@ -110,6 +114,8 @@ def c_multi_dist(
     example: NormalizedExample,
     tree: exp.Expression,
 ) -> list[MutationCandidate]:
+    """Toggle top-level ``SELECT DISTINCT`` semantics."""
+
     select = top_level_select(tree)
     if select is None:
         return []
@@ -134,6 +140,8 @@ def c_multi_setop(
     example: NormalizedExample,
     tree: exp.Expression,
 ) -> list[MutationCandidate]:
+    """Swap ``UNION`` and ``UNION ALL`` in set-operation queries."""
+
     candidates: list[MutationCandidate] = []
     for site_index, _union in enumerate(matching_nodes(tree, exp.Union)):
         mutated = clone_expression(tree)
@@ -159,6 +167,8 @@ def c_group_agg(
     example: NormalizedExample,
     tree: exp.Expression,
 ) -> list[MutationCandidate]:
+    """Replace aggregate functions with deterministic alternatives."""
+
     candidates: list[MutationCandidate] = []
     select = top_level_select(tree)
     alias_map = local_alias_map(select) if select is not None else []
@@ -208,6 +218,8 @@ def c_group_key(
     example: NormalizedExample,
     tree: exp.Expression,
 ) -> list[MutationCandidate]:
+    """Add or remove one ``GROUP BY`` key using projected columns."""
+
     select = top_level_select(tree)
     if select is None:
         return []
@@ -276,6 +288,8 @@ def c_bin_join(
     example: NormalizedExample,
     tree: exp.Expression,
 ) -> list[MutationCandidate]:
+    """Toggle eligible joins between inner and left join behavior."""
+
     candidates: list[MutationCandidate] = []
     eligible = matching_nodes(
         tree,
@@ -318,6 +332,8 @@ def c_bin_join(
 
 
 def _eligible_c_bin_join(current: exp.Expression) -> bool:
+    """Return whether a join can participate in the binary join mutation."""
+
     return (
         isinstance(current, exp.Join)
         and current.args.get("on") is not None
@@ -330,6 +346,8 @@ def c_sub_qual(
     example: NormalizedExample,
     tree: exp.Expression,
 ) -> list[MutationCandidate]:
+    """Rewrite simple ``IN`` and ``EXISTS`` qualification patterns."""
+
     candidates: list[MutationCandidate] = []
     candidates.extend(_in_to_exists(example, tree))
     candidates.extend(_exists_to_in(tree))
@@ -340,6 +358,8 @@ def _in_to_exists(
     example: NormalizedExample,
     tree: exp.Expression,
 ) -> list[MutationCandidate]:
+    """Rewrite recognized ``IN (subquery)`` shapes into correlated ``EXISTS``."""
+
     candidates: list[MutationCandidate] = []
     for site_index, node in enumerate(
         matching_nodes(
@@ -406,6 +426,8 @@ def _resolve_outer_in_column(
     example: NormalizedExample,
     predicate: exp.In,
 ) -> exp.Column | None:
+    """Resolve the outer ``IN`` column for correlation-safe ``EXISTS`` rewrites."""
+
     outer_column = predicate.this
     if not isinstance(outer_column, exp.Column):
         return None
@@ -427,6 +449,8 @@ def _resolve_outer_in_column(
 
 
 def _enclosing_select(expression: exp.Expression) -> exp.Select | None:
+    """Return the closest ancestor ``SELECT`` that owns an expression."""
+
     current = expression.parent
     while current is not None:
         if isinstance(current, exp.Select):
@@ -436,6 +460,8 @@ def _enclosing_select(expression: exp.Expression) -> exp.Select | None:
 
 
 def _exists_to_in(tree: exp.Expression) -> list[MutationCandidate]:
+    """Rewrite simple correlated ``EXISTS`` predicates back into ``IN`` form."""
+
     candidates: list[MutationCandidate] = []
     exists_nodes = matching_nodes(tree, exp.Exists)
     for site_index, exists in enumerate(exists_nodes):
@@ -488,6 +514,8 @@ def _extract_correlated_equality(
     predicate: exp.Expression,
     local_aliases: set[str],
 ) -> tuple[tuple[exp.Column, exp.Column] | None, exp.Expression | None]:
+    """Extract one correlated equality and the remaining predicate tree."""
+
     conditions = split_and_conditions(predicate)
     for index, condition in enumerate(conditions):
         if not isinstance(condition, exp.EQ):

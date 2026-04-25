@@ -26,6 +26,8 @@ def generate_mutations(
     profile: str = "canonical",
     max_generated_per_rule: int = DEFAULT_MAX_GENERATED_MUTANTS_PER_RULE,
 ) -> list[MutationRecord]:
+    """Generate mutation records for a batch of normalized benchmark examples."""
+
     if max_generated_per_rule < 1:
         raise ValueError("max_generated_per_rule must be at least 1.")
 
@@ -168,6 +170,8 @@ def generate_mutations(
 
 
 def read_normalized_examples(path: Path) -> list[NormalizedExample]:
+    """Read normalized examples from the JSONL artifact written by normalization."""
+
     examples: list[NormalizedExample] = []
     with path.open("r", encoding="utf-8") as file:
         for line_number, line in enumerate(file, start=1):
@@ -189,6 +193,8 @@ def read_normalized_examples(path: Path) -> list[NormalizedExample]:
 
 
 def read_mutation_records(path: Path) -> list[MutationRecord]:
+    """Read mutation records back from a ``mutants.jsonl`` artifact."""
+
     records: list[MutationRecord] = []
     with path.open("r", encoding="utf-8") as file:
         for line_number, line in enumerate(file, start=1):
@@ -209,6 +215,8 @@ def read_mutation_records(path: Path) -> list[MutationRecord]:
 
 
 def write_mutation_records(path: Path, records: list[MutationRecord]) -> None:
+    """Write mutation records as JSONL in their current order."""
+
     with path.open("w", encoding="utf-8") as file:
         for record in records:
             file.write(json.dumps(record.to_dict(), ensure_ascii=True))
@@ -224,6 +232,8 @@ def summarize_mutations(
     resumed: bool = False,
     skipped_stages: list[str] | None = None,
 ) -> MutationSummary:
+    """Aggregate high-level counts from a list of mutation records."""
+
     return MutationSummary(
         benchmark=benchmark,
         profile=profile,
@@ -236,6 +246,8 @@ def summarize_mutations(
 
 
 def _mutant_id(example_id: str, rule_id: str, index: int) -> str:
+    """Build the stable mutation identifier used in artifact rows."""
+
     return f"{example_id}:{rule_id}:{index:02d}"
 
 
@@ -248,6 +260,8 @@ def _skip_record(
     *,
     metadata: dict[str, object] | None = None,
 ) -> list[MutationRecord]:
+    """Build a skipped mutation row for one rule attempt."""
+
     return [
         MutationRecord(
             mutant_id=_mutant_id(example.example_id, rule_id, index),

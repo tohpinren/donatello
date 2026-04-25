@@ -27,6 +27,8 @@ def a_null_pred(
     example: NormalizedExample,
     tree: exp.Expression,
 ) -> list[MutationCandidate]:
+    """Flip ``IS NULL`` and ``IS NOT NULL`` predicates."""
+
     candidates: list[MutationCandidate] = []
 
     for site_index, _node in enumerate(
@@ -78,6 +80,8 @@ def a_topk_ties(
     example: NormalizedExample,
     tree: exp.Expression,
 ) -> list[MutationCandidate]:
+    """Mutate ordered top-k behavior by adjusting or removing ``LIMIT``."""
+
     select = top_level_select(tree)
     if select is None or not isinstance(select.args.get("order"), exp.Order):
         return []
@@ -134,6 +138,8 @@ def a_agg_edge(
     example: NormalizedExample,
     tree: exp.Expression,
 ) -> list[MutationCandidate]:
+    """Mutate counting semantics around ``COUNT(*)`` and distinct counting."""
+
     candidates: list[MutationCandidate] = []
     alias_map = (
         local_alias_map(select)
@@ -263,6 +269,8 @@ def a_pred_loc(
     example: NormalizedExample,
     tree: exp.Expression,
 ) -> list[MutationCandidate]:
+    """Move a non-aggregate predicate between ``WHERE`` and ``HAVING``."""
+
     select = top_level_select(tree)
     if select is None:
         return []
@@ -330,6 +338,8 @@ def a_subq_corr_drop(
     example: NormalizedExample,
     tree: exp.Expression,
 ) -> list[MutationCandidate]:
+    """Break a correlated subquery by rewriting the first outer reference."""
+
     candidates: list[MutationCandidate] = []
     subqueries = _correlated_subqueries(tree)
 
@@ -385,11 +395,15 @@ def _columns_within_group_keys(
     predicate: exp.Expression,
     group_keys: set[str],
 ) -> bool:
+    """Return whether every referenced column is already a grouping key."""
+
     column_sqls = {serialize_sql(column) for column in predicate.find_all(exp.Column)}
     return bool(column_sqls) and column_sqls.issubset(group_keys)
 
 
 def _correlated_subqueries(expression: exp.Expression) -> list[exp.Select]:
+    """Return nested selects that reference at least one outer-scope alias."""
+
     root = expression if isinstance(expression, exp.Select) else None
     return [
         select

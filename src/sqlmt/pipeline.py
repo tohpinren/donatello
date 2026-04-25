@@ -25,6 +25,8 @@ class PipelineError(RuntimeError):
 
 @dataclass(frozen=True)
 class DryRunPlan:
+    """Resolved plan shown to the user for a side-effect-free dry run."""
+
     experiment_name: str
     output_dir: str
     enabled_stages: list[str]
@@ -32,6 +34,8 @@ class DryRunPlan:
 
 
 def build_dry_run_plan(config: ExperimentConfig) -> DryRunPlan:
+    """Resolve artifacts and enabled stages without touching the filesystem."""
+
     artifacts = artifacts_for(config.output_dir)
     return DryRunPlan(
         experiment_name=config.experiment_name,
@@ -42,6 +46,8 @@ def build_dry_run_plan(config: ExperimentConfig) -> DryRunPlan:
 
 
 def prepare_run(config: ExperimentConfig) -> ExperimentArtifacts:
+    """Create the artifact root and return the resolved path wrapper."""
+
     artifacts = artifacts_for(config.output_dir)
     artifacts.ensure_base_dirs()
     return artifacts
@@ -75,6 +81,8 @@ def run_mutation_generation(
     config_path: Path,
     artifacts: ExperimentArtifacts,
 ) -> MutationSummary:
+    """Execute or resume mutation generation from normalized examples."""
+
     if not artifacts.normalized_examples.exists():
         raise PipelineError(
             "Mutation generation requires normalized_examples.jsonl, "
@@ -169,10 +177,14 @@ def run_normalization(
 
 
 def _write_config_snapshot(source: Path, target: Path) -> None:
+    """Copy the user-supplied config into the experiment artifact directory."""
+
     target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
 
 
 def _write_examples(path: Path, examples: list[NormalizedExample]) -> None:
+    """Write normalized examples as JSONL in source order."""
+
     with path.open("w", encoding="utf-8") as file:
         for example in examples:
             file.write(json.dumps(example.to_dict(), ensure_ascii=True))
@@ -184,6 +196,8 @@ def _summarize_existing_normalization(
     artifacts: ExperimentArtifacts,
     mode: str,
 ) -> NormalizationSummary:
+    """Summarize a previously written normalization artifact for resume mode."""
+
     if not artifacts.normalized_examples.exists():
         raise PipelineError(
             "resume is true but normalized_examples.jsonl does not exist."
@@ -228,6 +242,8 @@ def _summarize_existing_mutations(
     config: ExperimentConfig,
     artifacts: ExperimentArtifacts,
 ) -> MutationSummary:
+    """Summarize an existing mutation artifact when resume mode is enabled."""
+
     try:
         records = read_mutation_records(artifacts.mutants)
     except ValueError as exc:
