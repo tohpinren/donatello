@@ -255,6 +255,19 @@ def outer_columns(select: exp.Select) -> list[exp.Column]:
     ]
 
 
+def correlated_subqueries(expression: exp.Expression) -> list[exp.Select]:
+    """Return nested selects that reference at least one outer-scope alias."""
+
+    root = expression if isinstance(expression, exp.Select) else None
+    return [
+        select
+        for select in matching_nodes(expression, exp.Select)
+        if isinstance(select, exp.Select)
+        and select is not root
+        and bool(outer_columns(select))
+    ]
+
+
 def local_columns_for_subquery(
     select: exp.Select,
     schema: NormalizedSchema,

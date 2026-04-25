@@ -9,6 +9,7 @@ from sqlmt.mutation.helpers import (
     clone_expression,
     column_info_for_reference,
     comparison_nodes,
+    correlated_subqueries,
     direct_tables,
     has_wildcard,
     literal_string,
@@ -97,7 +98,7 @@ def b_subq_scope_typo(
     """Rewrite a correlated reference to the wrong local alias in a subquery."""
 
     candidates: list[MutationCandidate] = []
-    subqueries = _correlated_subqueries(tree)
+    subqueries = correlated_subqueries(tree)
 
     for site_index, subquery in enumerate(subqueries):
         outer_refs = outer_columns(subquery)
@@ -124,7 +125,7 @@ def b_subq_scope_typo(
             continue
 
         mutated = clone_expression(tree)
-        target_subqueries = _correlated_subqueries(mutated)
+        target_subqueries = correlated_subqueries(mutated)
         if site_index >= len(target_subqueries):
             continue
         target_subquery = target_subqueries[site_index]
@@ -391,19 +392,6 @@ def b_domain_mismatch_comp(
         )
 
     return candidates
-
-
-def _correlated_subqueries(expression: exp.Expression) -> list[exp.Select]:
-    """Return nested selects that reference at least one outer-scope alias."""
-
-    root = expression if isinstance(expression, exp.Select) else None
-    return [
-        select
-        for select in matching_nodes(expression, exp.Select)
-        if isinstance(select, exp.Select)
-        and select is not root
-        and bool(outer_columns(select))
-    ]
 
 
 RULES_B = [
