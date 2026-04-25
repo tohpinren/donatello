@@ -47,8 +47,8 @@ def test_verieql_input_uses_generated_mutants_and_schema() -> None:
     ]
     schema = cast(dict[str, dict[str, str]], row["schema"])
     constraints = cast(list[Any], row["constraint"])
-    assert schema["employees"]["salary"] == "INT"
-    assert {"primary": [{"value": "employees__id"}]} in constraints
+    assert schema["EMPLOYEES"]["SALARY"] == "INT"
+    assert {"primary": [{"value": "EMPLOYEES__ID"}]} in constraints
 
 
 def test_run_equivalence_filtering_maps_verieql_states_and_writes_artifact(
@@ -179,7 +179,12 @@ def _fake_verieql_runner(
     timeout: int,
 ) -> subprocess.CompletedProcess[str]:
     assert cwd.name == "VeriEQL"
-    assert timeout == 125
+    assert timeout == 685
+    assert command[:3] == [
+        "/tmp/verieql/bin/python",
+        "-m",
+        "parallel.cli_within_timeout",
+    ]
     input_path = Path(command[command.index("-f") + 1])
     output_path = Path(command[command.index("-o") + 1])
     input_rows = read_jsonl(input_path)

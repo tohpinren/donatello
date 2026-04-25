@@ -139,7 +139,8 @@ def run_equivalence_filtering(
         _write_jsonl(input_path, input_rows)
         command = [
             str(config.tools.verieql_python),
-            str(config.tools.verieql_path / "parallel" / "cli_within_timeout.py"),
+            "-m",
+            "parallel.cli_within_timeout",
             "-f",
             str(input_path),
             "-t",
@@ -155,7 +156,16 @@ def run_equivalence_filtering(
                 active_runner,
                 command,
                 cwd=config.tools.verieql_path,
-                timeout=config.timeouts.verieql_seconds,
+                timeout=_subprocess_timeout(
+                    config.timeouts.verieql_seconds,
+                    len(generated_mutations),
+                ),
+            )
+        except subprocess.TimeoutExpired as exc:
+            records = _timeout_records_for_subprocess(
+                generated_mutations,
+                timeout_seconds=config.timeouts.verieql_seconds,
+                error=str(exc),
             )
         except subprocess.CalledProcessError as exc:
             records = _error_records_for_subprocess(
@@ -350,6 +360,27 @@ def _error_records_for_subprocess(
     ]
 
 
+def _timeout_records_for_subprocess(
+    mutations: list[MutationRecord],
+    *,
+    timeout_seconds: int,
+    error: str,
+) -> list[EquivalenceRecord]:
+    """Build one timeout record per mutant after batch timeout."""
+
+    return [
+        EquivalenceRecord(
+            mutant_id=mutation.mutant_id,
+            example_id=mutation.example_id,
+            outcome="timeout",
+            raw_state="TMO",
+            timeout_seconds=timeout_seconds,
+            error=error,
+        )
+        for mutation in mutations
+    ]
+
+
 def _error_record(
     mutation: MutationRecord,
     *,
@@ -372,15 +403,17 @@ def _schema_for_verieql(schema: NormalizedSchema) -> dict[str, dict[str, str]]:
     """Convert normalized schema metadata into VeriEQL's table/column map."""
 
     table_names = schema.table_names_original or schema.table_names
-    result = {table: {} for table in table_names}
+    result = {_verieql_identifier(table): {} for table in table_names}
     for index, (table_index, column_name) in enumerate(schema.column_names_original):
         if table_index < 0 or column_name == "*":
             continue
-        table_name = table_names[table_index]
+        table_name = _verieql_identifier(table_names[table_index])
         column_type = (
             schema.column_types[index] if index < len(schema.column_types) else ""
         )
-        result[table_name][column_name] = _verieql_type(column_type)
+        result[table_name][_verieql_identifier(column_name)] = _verieql_type(
+            column_type
+        )
     return result
 
 
@@ -422,7 +455,15 @@ def _constraint_value(schema: NormalizedSchema, column_index: int) -> str | None
     table_names = schema.table_names_original or schema.table_names
     if table_index < 0 or table_index >= len(table_names):
         return None
-    return f"{table_names[table_index]}__{column_name}"
+    table_name = _verieql_identifier(table_names[table_index])
+    column = _verieql_identifier(column_name)
+    return f"{table_name}__{column}"
+
+
+def _verieql_identifier(identifier: str) -> str:
+    """Normalize unquoted benchmark identifiers to VeriEQL's parser casing."""
+
+    return identifier.upper()
 
 
 def _verieql_type(column_type: str) -> str:
@@ -466,6 +507,12 @@ def _count(records: list[EquivalenceRecord], outcome: EquivalenceOutcome) -> int
     """Count records with one outcome."""
 
     return sum(1 for record in records if record.outcome == outcome)
+
+
+def _subprocess_timeout(pair_timeout_seconds: int, pair_count: int) -> int:
+    """Return a conservative timeout for one VeriEQL batch subprocess."""
+
+    return pair_timeout_seconds * max(1, pair_count) + 60
 
 
 def _skipped_stages(config: ExperimentConfig) -> list[str]:

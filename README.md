@@ -78,6 +78,8 @@ Local development setup:
 git clone https://github.com/VeriEQL/VeriEQL.git /Users/tohpinren/Repos/VeriEQL
 python3.11 -m venv /Users/tohpinren/Repos/VeriEQL/.venv
 /Users/tohpinren/Repos/VeriEQL/.venv/bin/pip install -r /Users/tohpinren/Repos/VeriEQL/requirements.txt
+/Users/tohpinren/Repos/VeriEQL/.venv/bin/pip install --force-reinstall 'z3-solver==4.15.0.0'
+cp /Users/tohpinren/Repos/VeriEQL/z3py_libs/*.py /Users/tohpinren/Repos/VeriEQL/.venv/lib/python3.11/site-packages/z3/
 
 export VERIEQL_ROOT=/Users/tohpinren/Repos/VeriEQL
 export VERIEQL_PYTHON=/Users/tohpinren/Repos/VeriEQL/.venv/bin/python
@@ -89,10 +91,16 @@ Remote server setup follows the same pattern:
 git clone https://github.com/VeriEQL/VeriEQL.git ~/tools/VeriEQL
 python3.11 -m venv ~/venvs/verieql
 ~/venvs/verieql/bin/pip install -r ~/tools/VeriEQL/requirements.txt
+~/venvs/verieql/bin/pip install --force-reinstall 'z3-solver==4.15.0.0'
+cp ~/tools/VeriEQL/z3py_libs/*.py ~/venvs/verieql/lib/python3.11/site-packages/z3/
 
 export VERIEQL_ROOT=~/tools/VeriEQL
 export VERIEQL_PYTHON=~/venvs/verieql/bin/python
 ```
+
+The pipeline runs VeriEQL from that checkout as
+`$VERIEQL_PYTHON -m parallel.cli_within_timeout` with the working directory set
+to `$VERIEQL_ROOT`.
 
 ## Benchmark Data Setup
 
