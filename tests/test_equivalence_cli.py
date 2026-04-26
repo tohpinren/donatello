@@ -32,7 +32,7 @@ def test_cli_run_writes_equivalence_output(tmp_path: Path) -> None:
     assert output_dir.joinpath("equivalence.jsonl").exists()
     rows = read_jsonl(output_dir / "equivalence.jsonl")
     assert rows
-    assert {row["outcome"] for row in rows} == {"likely_non_equivalent"}
+    assert {row["outcome"] for row in rows} == {"proven_non_equivalent"}
 
 
 def test_cli_run_equivalence_only_requires_existing_mutants(tmp_path: Path) -> None:

@@ -233,7 +233,7 @@ def summarize_equivalence(
     return EquivalenceSummary(
         checked_count=len(records),
         proven_equivalent_count=_count(records, "proven_equivalent"),
-        likely_non_equivalent_count=_count(records, "likely_non_equivalent"),
+        proven_non_equivalent_count=_count(records, "proven_non_equivalent"),
         timeout_count=_count(records, "timeout"),
         unsupported_count=_count(records, "unsupported"),
         error_count=_count(records, "error"),
@@ -484,7 +484,7 @@ def _outcome_for_state(raw_state: str | None) -> EquivalenceOutcome:
     if raw_state == "EQU":
         return "proven_equivalent"
     if raw_state == "NEQ":
-        return "likely_non_equivalent"
+        return "proven_non_equivalent"
     if raw_state == "TMO":
         return "timeout"
     if raw_state in {"NSE", "NIE"}:

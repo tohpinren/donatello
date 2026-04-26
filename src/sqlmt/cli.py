@@ -262,7 +262,7 @@ def run(
         typer.echo(
             f"{action} for {equivalence_summary.checked_count} generated mutants: "
             f"{equivalence_summary.proven_equivalent_count} proven equivalent, "
-            f"{equivalence_summary.likely_non_equivalent_count} likely "
+            f"{equivalence_summary.proven_non_equivalent_count} proven "
             f"non-equivalent, {equivalence_summary.timeout_count} timeout, "
             f"{equivalence_summary.unsupported_count} unsupported, "
             f"{equivalence_summary.error_count} error."

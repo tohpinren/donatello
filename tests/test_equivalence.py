@@ -107,7 +107,7 @@ def test_run_equivalence_filtering_maps_verieql_states_and_writes_artifact(
 
     assert summary.checked_count == 6
     assert summary.proven_equivalent_count == 1
-    assert summary.likely_non_equivalent_count == 1
+    assert summary.proven_non_equivalent_count == 1
     assert summary.timeout_count == 1
     assert summary.unsupported_count == 2
     assert summary.error_count == 1
@@ -124,7 +124,7 @@ def test_run_equivalence_filtering_maps_verieql_states_and_writes_artifact(
     ]
     assert [row["outcome"] for row in rows] == [
         "proven_equivalent",
-        "likely_non_equivalent",
+        "proven_non_equivalent",
         "timeout",
         "unsupported",
         "unsupported",
@@ -144,7 +144,7 @@ def test_run_equivalence_filtering_resumes_existing_artifact(
         EquivalenceRecord(
             mutant_id="m1",
             example_id="bird:dev:000000",
-            outcome="likely_non_equivalent",
+            outcome="proven_non_equivalent",
             raw_state="NEQ",
             timeout_seconds=120,
         )

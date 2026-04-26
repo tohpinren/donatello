@@ -134,7 +134,7 @@ MutationSkipReason = Literal[
 ]
 EquivalenceOutcome = Literal[
     "proven_equivalent",
-    "likely_non_equivalent",
+    "proven_non_equivalent",
     "timeout",
     "unsupported",
     "error",
@@ -290,7 +290,7 @@ class EquivalenceSummary:
 
     checked_count: int
     proven_equivalent_count: int
-    likely_non_equivalent_count: int
+    proven_non_equivalent_count: int
     timeout_count: int
     unsupported_count: int
     error_count: int
