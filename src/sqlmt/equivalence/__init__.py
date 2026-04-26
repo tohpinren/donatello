@@ -152,8 +152,7 @@ def run_equivalence_filtering(
         ]
         active_runner = runner or _run_subprocess
         try:
-            _invoke_runner(
-                active_runner,
+            active_runner(
                 command,
                 cwd=config.tools.verieql_path,
                 timeout=_subprocess_timeout(
@@ -162,14 +161,18 @@ def run_equivalence_filtering(
                 ),
             )
         except subprocess.TimeoutExpired as exc:
-            records = _timeout_records_for_subprocess(
+            records = _subprocess_failure_records(
                 generated_mutations,
+                outcome="timeout",
+                raw_state="TMO",
                 timeout_seconds=config.timeouts.verieql_seconds,
                 error=str(exc),
             )
         except subprocess.CalledProcessError as exc:
-            records = _error_records_for_subprocess(
+            records = _subprocess_failure_records(
                 generated_mutations,
+                outcome="error",
+                raw_state=None,
                 timeout_seconds=config.timeouts.verieql_seconds,
                 error=exc.stderr or exc.stdout or str(exc),
             )
@@ -261,18 +264,6 @@ def _run_subprocess(
     )
 
 
-def _invoke_runner(
-    runner: VeriEQLRunner,
-    command: list[str],
-    *,
-    cwd: Path,
-    timeout: int,
-) -> subprocess.CompletedProcess[str]:
-    """Call a test or production runner with keyword-only context."""
-
-    return runner(command, cwd=cwd, timeout=timeout)
-
-
 def _records_from_verieql_output(
     output_path: Path,
     mutations: list[MutationRecord],
@@ -342,38 +333,22 @@ def _read_raw_verieql_rows(path: Path) -> dict[str, dict[str, Any]]:
     return rows
 
 
-def _error_records_for_subprocess(
+def _subprocess_failure_records(
     mutations: list[MutationRecord],
     *,
+    outcome: EquivalenceOutcome,
+    raw_state: str | None,
     timeout_seconds: int,
     error: str,
 ) -> list[EquivalenceRecord]:
-    """Build one error record per generated mutant after process failure."""
-
-    return [
-        _error_record(
-            mutation,
-            timeout_seconds=timeout_seconds,
-            error=error,
-        )
-        for mutation in mutations
-    ]
-
-
-def _timeout_records_for_subprocess(
-    mutations: list[MutationRecord],
-    *,
-    timeout_seconds: int,
-    error: str,
-) -> list[EquivalenceRecord]:
-    """Build one timeout record per mutant after batch timeout."""
+    """Build one record per generated mutant after batch subprocess failure."""
 
     return [
         EquivalenceRecord(
             mutant_id=mutation.mutant_id,
             example_id=mutation.example_id,
-            outcome="timeout",
-            raw_state="TMO",
+            outcome=outcome,
+            raw_state=raw_state,
             timeout_seconds=timeout_seconds,
             error=error,
         )
