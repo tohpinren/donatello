@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from typing import Any
 
+import pytest
+
+import sqlmt.execution as execution
 from sqlmt.artifacts import artifacts_for
 from sqlmt.config import ExperimentConfig, StageConfig, TimeoutConfig
 from sqlmt.equivalence import write_equivalence_records
@@ -148,6 +152,122 @@ def test_sqlite_execution_times_out_long_running_query(tmp_path: Path) -> None:
     assert rows[0].outcome == "timeout"
     assert rows[0].error_phase == "mutant"
     assert "timed out" in (rows[0].error or "")
+
+
+def test_sqlite_execution_reuses_cached_gold_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "company.sqlite"
+    artifacts = artifacts_for(tmp_path / "outputs")
+    artifacts.ensure_base_dirs()
+    write_mutation_records(
+        artifacts.mutants,
+        [
+            _mutation("slow_1", db_path=db_path),
+            _mutation("slow_2", db_path=db_path),
+        ],
+    )
+    write_equivalence_records(
+        artifacts.equivalence,
+        [
+            _equivalence("slow_1", "proven_non_equivalent"),
+            _equivalence("slow_2", "proven_non_equivalent"),
+        ],
+    )
+    calls: list[str] = []
+
+    def fake_execute_sql(
+        path: Path,
+        sql: str,
+        *,
+        timeout_seconds: int,
+    ) -> list[tuple[Any, ...]]:
+        calls.append(sql)
+        raise TimeoutError("SQLite query timed out after 1 seconds.")
+
+    monkeypatch.setattr(execution, "_execute_sql", fake_execute_sql)
+
+    summary = run_sqlite_execution(
+        _config(tmp_path, sqlite_seconds=1),
+        artifacts=artifacts,
+    )
+
+    assert summary.executed_count == 2
+    assert summary.timeout_count == 2
+    assert calls == ["SELECT name FROM employees ORDER BY id"]
+    rows = read_execution_records(artifacts.execution)
+    assert [row.outcome for row in rows] == ["timeout", "timeout"]
+    assert [row.error_phase for row in rows] == ["gold", "gold"]
+
+
+def test_sqlite_execution_resumes_partial_artifact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "company.sqlite"
+    artifacts = artifacts_for(tmp_path / "outputs")
+    artifacts.ensure_base_dirs()
+    write_mutation_records(
+        artifacts.mutants,
+        [
+            _mutation("done", db_path=db_path, mutant_sql="SELECT same"),
+            _mutation("pending", db_path=db_path, mutant_sql="SELECT interrupt"),
+        ],
+    )
+    write_equivalence_records(
+        artifacts.equivalence,
+        [
+            _equivalence("done", "proven_non_equivalent"),
+            _equivalence("pending", "proven_non_equivalent"),
+        ],
+    )
+
+    def interrupted_execute_sql(
+        path: Path,
+        sql: str,
+        *,
+        timeout_seconds: int,
+    ) -> list[tuple[Any, ...]]:
+        if sql == "SELECT interrupt":
+            raise KeyboardInterrupt
+        return [("Ada",)]
+
+    monkeypatch.setattr(execution, "_execute_sql", interrupted_execute_sql)
+
+    with pytest.raises(KeyboardInterrupt):
+        run_sqlite_execution(
+            _config(tmp_path, resume=True),
+            artifacts=artifacts,
+        )
+
+    assert [row.mutant_id for row in read_execution_records(artifacts.execution)] == [
+        "done"
+    ]
+
+    def resumed_execute_sql(
+        path: Path,
+        sql: str,
+        *,
+        timeout_seconds: int,
+    ) -> list[tuple[Any, ...]]:
+        assert sql != "SELECT same"
+        if sql == "SELECT interrupt":
+            return [("Grace",)]
+        return [("Ada",)]
+
+    monkeypatch.setattr(execution, "_execute_sql", resumed_execute_sql)
+
+    summary = run_sqlite_execution(
+        _config(tmp_path, resume=True),
+        artifacts=artifacts,
+    )
+
+    assert summary.resumed is True
+    assert summary.executed_count == 2
+    rows = read_execution_records(artifacts.execution)
+    assert [row.mutant_id for row in rows] == ["done", "pending"]
+    assert [row.outcome for row in rows] == ["survived", "killed"]
 
 
 def test_sqlite_execution_resumes_existing_artifact(tmp_path: Path) -> None:

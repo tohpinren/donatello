@@ -31,24 +31,41 @@ def run_sqlite_execution(
 
     if artifacts.execution.exists():
         if config.resume:
+            existing_records = read_execution_records(artifacts.execution)
+            resumed = True
+        if not config.overwrite:
+            if not config.resume:
+                raise ValueError(
+                    "Execution outputs already exist: execution.jsonl. "
+                    "Set resume: true to reuse them or overwrite: true to replace them."
+                )
+        if config.overwrite:
+            artifacts.execution.unlink()
+            existing_records = []
+            resumed = False
+    else:
+        existing_records = []
+        resumed = False
+
+    if not artifacts.mutants.exists():
+        if resumed:
             return summarize_execution(
-                read_execution_records(artifacts.execution),
+                existing_records,
                 output_path=artifacts.execution,
                 resumed=True,
                 skipped_stages=_skipped_stages(config),
             )
-        if not config.overwrite:
-            raise ValueError(
-                "Execution outputs already exist: execution.jsonl. "
-                "Set resume: true to reuse them or overwrite: true to replace them."
-            )
-        artifacts.execution.unlink()
-
-    if not artifacts.mutants.exists():
         raise ValueError(
             "SQLite execution requires mutants.jsonl, but it does not exist."
         )
     if not artifacts.equivalence.exists():
+        if resumed:
+            return summarize_execution(
+                existing_records,
+                output_path=artifacts.execution,
+                resumed=True,
+                skipped_stages=_skipped_stages(config),
+            )
         raise ValueError(
             "SQLite execution requires equivalence.jsonl, but it does not exist."
         )
@@ -56,14 +73,22 @@ def run_sqlite_execution(
     mutations = read_mutation_records(artifacts.mutants)
     equivalence_records = read_equivalence_records(artifacts.equivalence)
     retained = _retained_mutations(mutations, equivalence_records)
-    records = execute_mutations(
-        retained,
+    existing_ids = {record.mutant_id for record in existing_records}
+    pending = [
+        mutation for mutation in retained if mutation.mutant_id not in existing_ids
+    ]
+    _ensure_execution_artifact(artifacts.execution)
+    new_records = execute_mutations(
+        pending,
         timeout_seconds=config.timeouts.sqlite_seconds,
+        output_path=artifacts.execution,
     )
+    records = existing_records + new_records
     write_execution_records(artifacts.execution, records)
     return summarize_execution(
         records,
         output_path=artifacts.execution,
+        resumed=resumed,
         skipped_stages=_skipped_stages(config),
     )
 
@@ -72,25 +97,36 @@ def execute_mutations(
     mutations: list[MutationRecord],
     *,
     timeout_seconds: int = 120,
+    output_path: Path | None = None,
 ) -> list[ExecutionRecord]:
     """Execute retained mutants and compare them with cached gold SQL results."""
 
     records: list[ExecutionRecord] = []
-    gold_cache: dict[tuple[str, str], list[tuple[Any, ...]]] = {}
+    gold_cache: dict[tuple[str, str], list[tuple[Any, ...]] | Exception] = {}
     for mutation in mutations:
         if mutation.mutant_sql is None:
             continue
         cache_key = (mutation.sqlite_path, mutation.gold_sql)
         try:
             if cache_key not in gold_cache:
-                gold_cache[cache_key] = _execute_sql(
-                    Path(mutation.sqlite_path),
-                    mutation.gold_sql,
-                    timeout_seconds=timeout_seconds,
-                )
-            gold_rows = gold_cache[cache_key]
+                try:
+                    gold_cache[cache_key] = _execute_sql(
+                        Path(mutation.sqlite_path),
+                        mutation.gold_sql,
+                        timeout_seconds=timeout_seconds,
+                    )
+                except Exception as exc:
+                    gold_cache[cache_key] = exc
+            cached_gold = gold_cache[cache_key]
+            if isinstance(cached_gold, Exception):
+                raise cached_gold
+            gold_rows = cached_gold
         except Exception as exc:
-            records.append(_error_record(mutation, "gold", exc))
+            _record_result(
+                records,
+                _error_record(mutation, "gold", exc),
+                output_path=output_path,
+            )
             continue
 
         try:
@@ -100,11 +136,16 @@ def execute_mutations(
                 timeout_seconds=timeout_seconds,
             )
         except Exception as exc:
-            records.append(_error_record(mutation, "mutant", exc))
+            _record_result(
+                records,
+                _error_record(mutation, "mutant", exc),
+                output_path=output_path,
+            )
             continue
 
         outcome: ExecutionOutcome = "survived" if gold_rows == mutant_rows else "killed"
-        records.append(
+        _record_result(
+            records,
             ExecutionRecord(
                 mutant_id=mutation.mutant_id,
                 example_id=mutation.example_id,
@@ -118,7 +159,8 @@ def execute_mutations(
                 mutant_row_count=len(mutant_rows),
                 gold_sample=_sample_rows(gold_rows),
                 mutant_sample=_sample_rows(mutant_rows),
-            )
+            ),
+            output_path=output_path,
         )
     return records
 
@@ -152,6 +194,27 @@ def write_execution_records(path: Path, records: list[ExecutionRecord]) -> None:
         for record in records:
             file.write(json.dumps(record.to_dict(), ensure_ascii=True))
             file.write("\n")
+
+
+def append_execution_record(path: Path, record: ExecutionRecord) -> None:
+    """Append one execution record to a JSONL artifact."""
+
+    with path.open("a", encoding="utf-8") as file:
+        file.write(json.dumps(record.to_dict(), ensure_ascii=True))
+        file.write("\n")
+
+
+def _record_result(
+    records: list[ExecutionRecord],
+    record: ExecutionRecord,
+    *,
+    output_path: Path | None,
+) -> None:
+    """Keep the in-memory summary and on-disk checkpoint in sync."""
+
+    records.append(record)
+    if output_path is not None:
+        append_execution_record(output_path, record)
 
 
 def summarize_execution(
@@ -197,6 +260,13 @@ def _retained_mutations(
         and mutation.mutant_sql is not None
         and mutation.mutant_id in retained_ids
     ]
+
+
+def _ensure_execution_artifact(path: Path) -> None:
+    """Create an empty execution artifact so empty runs are resumable."""
+
+    if not path.exists():
+        path.touch()
 
 
 def _execute_sql(
