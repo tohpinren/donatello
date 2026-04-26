@@ -98,6 +98,7 @@ def test_sqlite_execution_classifies_outcomes_and_scores(
     assert summary.executed_count == 4
     assert summary.killed_count == 1
     assert summary.survived_count == 1
+    assert summary.timeout_count == 0
     assert summary.error_count == 2
     assert summary.mutation_score == 0.5
     rows = {row.mutant_id: row for row in read_execution_records(artifacts.execution)}
@@ -140,9 +141,11 @@ def test_sqlite_execution_times_out_long_running_query(tmp_path: Path) -> None:
     )
 
     assert summary.executed_count == 1
-    assert summary.error_count == 1
+    assert summary.timeout_count == 1
+    assert summary.error_count == 0
+    assert summary.mutation_score is None
     rows = read_execution_records(artifacts.execution)
-    assert rows[0].outcome == "error"
+    assert rows[0].outcome == "timeout"
     assert rows[0].error_phase == "mutant"
     assert "timed out" in (rows[0].error or "")
 

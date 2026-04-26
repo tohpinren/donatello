@@ -289,6 +289,7 @@ def run(
             f"{action} {execution_summary.executed_count} retained mutants: "
             f"{execution_summary.killed_count} killed, "
             f"{execution_summary.survived_count} survived, "
+            f"{execution_summary.timeout_count} timeout, "
             f"{execution_summary.error_count} error, "
             f"mutation score {score}."
         )

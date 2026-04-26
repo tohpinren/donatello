@@ -26,7 +26,7 @@ What works today:
 - VeriEQL equivalence filtering with explicit proven equivalent, proven
   non-equivalent, timeout, unsupported, and error outcomes
 - SQLite execution for retained proven non-equivalent mutants, with killed,
-  survived, error, and mutation-score outputs
+  survived, timeout, error, and mutation-score outputs
 - resumable artifact-based runs driven by YAML config files
 - `uv`-managed Python environment with Ruff, Ty, and pytest
 
@@ -260,7 +260,7 @@ The execution mutation score is:
 killed / (killed + survived)
 ```
 
-Execution errors are reported separately and excluded from the score.
+Execution timeouts and errors are reported separately and excluded from the score.
 
 ## Mutation Profile
 

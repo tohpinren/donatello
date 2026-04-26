@@ -50,6 +50,7 @@ def test_cli_run_writes_execution_output(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert "Executed 1 retained mutants" in result.stdout
+    assert "0 timeout" in result.stdout
     assert "mutation score 1.0000" in result.stdout
     assert output_dir.joinpath("execution.jsonl").exists()
 

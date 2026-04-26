@@ -67,6 +67,7 @@ def run_sqlite_execution(
         skipped_stages=_skipped_stages(config),
     )
 
+
 def execute_mutations(
     mutations: list[MutationRecord],
     *,
@@ -169,6 +170,7 @@ def summarize_execution(
         executed_count=len(records),
         killed_count=killed_count,
         survived_count=survived_count,
+        timeout_count=_count(records, "timeout"),
         error_count=_count(records, "error"),
         mutation_score=(killed_count / denominator if denominator else None),
         output_path=str(output_path),
@@ -236,10 +238,13 @@ def _error_record(
 ) -> ExecutionRecord:
     """Build an execution error record for one mutant."""
 
+    outcome: ExecutionOutcome = (
+        "timeout" if isinstance(error, TimeoutError) else "error"
+    )
     return ExecutionRecord(
         mutant_id=mutation.mutant_id,
         example_id=mutation.example_id,
-        outcome="error",
+        outcome=outcome,
         gold_sql=mutation.gold_sql,
         mutant_sql=mutation.mutant_sql or "",
         sqlite_path=mutation.sqlite_path,

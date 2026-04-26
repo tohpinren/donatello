@@ -139,7 +139,7 @@ EquivalenceOutcome = Literal[
     "unsupported",
     "error",
 ]
-ExecutionOutcome = Literal["killed", "survived", "error"]
+ExecutionOutcome = Literal["killed", "survived", "timeout", "error"]
 
 
 @dataclass(frozen=True)
@@ -381,6 +381,7 @@ class ExecutionSummary:
     executed_count: int
     killed_count: int
     survived_count: int
+    timeout_count: int
     error_count: int
     mutation_score: float | None
     output_path: str
