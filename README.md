@@ -25,12 +25,13 @@ What works today:
 - canonical mutation generation with all 19 mutation rules
 - VeriEQL equivalence filtering with explicit proven equivalent, proven
   non-equivalent, timeout, unsupported, and error outcomes
+- SQLite execution for retained proven non-equivalent mutants, with killed,
+  survived, timeout, error, and mutation-score outputs
 - resumable artifact-based runs driven by YAML config files
 - `uv`-managed Python environment with Ruff, Ty, and pytest
 
 What is planned next:
 
-- SQLite execution and mutation scoring
 - SQLDriller counterexample generation
 - Spider 2.0 SQLite-subset normalization
 - reporting and benchmark augmentation
@@ -183,7 +184,7 @@ Main fields:
 - `output_dir`: artifact directory for the run
 - `mutation_profile`: currently `canonical`
 - `resume` / `overwrite`: artifact reuse behavior
-- `stages`: enable `normalize`, `mutate`, and `equivalence` today
+- `stages`: enable `normalize`, `mutate`, `equivalence`, and `execute` today
 
 Example local config:
 
@@ -202,13 +203,14 @@ stages:
   normalize: true
   mutate: true
   equivalence: true
-  execute: false
+  execute: true
   counterexamples: false
   augment: false
   report: false
 
 timeouts:
   verieql_seconds: 120
+  sqlite_seconds: 120
   sqldriller_seconds: 300
 
 tools:
@@ -246,8 +248,19 @@ Current stage behavior:
 - mutation generation reads `normalized_examples.jsonl` and writes `mutants.jsonl`
 - equivalence filtering reads `normalized_examples.jsonl` and `mutants.jsonl`,
   runs VeriEQL, and writes `equivalence.jsonl`
+- SQLite execution reads `mutants.jsonl` and `equivalence.jsonl`, runs only
+  `proven_non_equivalent` mutants, applies `timeouts.sqlite_seconds` per query,
+  and writes `execution.jsonl`
 - `resume: true` reuses existing artifacts
 - `overwrite: true` replaces them
+
+The execution mutation score is:
+
+```text
+killed / (killed + survived)
+```
+
+Execution timeouts and errors are reported separately and excluded from the score.
 
 ## Mutation Profile
 

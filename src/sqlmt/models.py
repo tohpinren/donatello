@@ -139,6 +139,7 @@ EquivalenceOutcome = Literal[
     "unsupported",
     "error",
 ]
+ExecutionOutcome = Literal["killed", "survived", "timeout", "error"]
 
 
 @dataclass(frozen=True)
@@ -294,6 +295,95 @@ class EquivalenceSummary:
     timeout_count: int
     unsupported_count: int
     error_count: int
+    output_path: str
+    resumed: bool = False
+    skipped_stages: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ExecutionRecord:
+    """One SQLite execution comparison for a retained mutant."""
+
+    mutant_id: str
+    example_id: str
+    outcome: ExecutionOutcome
+    gold_sql: str
+    mutant_sql: str
+    sqlite_path: str
+    rule: str
+    profile: str
+    gold_row_count: int | None = None
+    mutant_row_count: int | None = None
+    gold_sample: list[list[Any]] = field(default_factory=list)
+    mutant_sample: list[list[Any]] = field(default_factory=list)
+    error_phase: str | None = None
+    error: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, object]:
+        """Serialize one execution comparison into the JSONL artifact shape."""
+
+        return {
+            "mutant_id": self.mutant_id,
+            "example_id": self.example_id,
+            "outcome": self.outcome,
+            "gold_sql": self.gold_sql,
+            "mutant_sql": self.mutant_sql,
+            "sqlite_path": self.sqlite_path,
+            "rule": self.rule,
+            "profile": self.profile,
+            "gold_row_count": self.gold_row_count,
+            "mutant_row_count": self.mutant_row_count,
+            "gold_sample": self.gold_sample,
+            "mutant_sample": self.mutant_sample,
+            "error_phase": self.error_phase,
+            "error": self.error,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, row: dict[str, Any]) -> ExecutionRecord:
+        """Parse an execution record read back from ``execution.jsonl``."""
+
+        return cls(
+            mutant_id=str(row["mutant_id"]),
+            example_id=str(row["example_id"]),
+            outcome=cast(ExecutionOutcome, row["outcome"]),
+            gold_sql=str(row["gold_sql"]),
+            mutant_sql=str(row["mutant_sql"]),
+            sqlite_path=str(row["sqlite_path"]),
+            rule=str(row["rule"]),
+            profile=str(row["profile"]),
+            gold_row_count=(
+                int(row["gold_row_count"])
+                if row.get("gold_row_count") is not None
+                else None
+            ),
+            mutant_row_count=(
+                int(row["mutant_row_count"])
+                if row.get("mutant_row_count") is not None
+                else None
+            ),
+            gold_sample=[list(item) for item in row.get("gold_sample", [])],
+            mutant_sample=[list(item) for item in row.get("mutant_sample", [])],
+            error_phase=(
+                str(row["error_phase"]) if row.get("error_phase") is not None else None
+            ),
+            error=str(row["error"]) if row.get("error") is not None else None,
+            metadata=dict(row.get("metadata", {})),
+        )
+
+
+@dataclass(frozen=True)
+class ExecutionSummary:
+    """High-level counts and mutation score for SQLite execution."""
+
+    executed_count: int
+    killed_count: int
+    survived_count: int
+    timeout_count: int
+    error_count: int
+    mutation_score: float | None
     output_path: str
     resumed: bool = False
     skipped_stages: list[str] = field(default_factory=list)

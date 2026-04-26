@@ -444,6 +444,39 @@ def test_a_topk_ties_keeps_offset_removal_sqlite_valid() -> None:
         connection.close()
 
 
+def test_b_from_unused_tv_uses_original_table_name_for_sqlite() -> None:
+    schema = NormalizedSchema(
+        table_names=["display used table", "free and reduced-price meals"],
+        table_names_original=["used_table", "frpm"],
+        column_names=[(-1, "*"), (0, "id"), (1, "id")],
+        column_names_original=[(-1, "*"), (0, "id"), (1, "id")],
+        column_types=["text", "integer", "integer"],
+        primary_keys=[],
+        foreign_keys=[],
+    )
+    example = make_normalized_example(
+        "SELECT u.id FROM used_table u",
+        schema=schema,
+    )
+
+    records = generate_mutations([example], rules=[_rule("b_from_unused_tv")])
+
+    generated = [record for record in records if record.status == "generated"]
+    assert len(generated) == 1
+    mutant_sql = generated[0].mutant_sql
+    assert mutant_sql is not None
+    assert "CROSS JOIN frpm" in mutant_sql
+    assert "free and reduced-price meals" not in mutant_sql
+
+    connection = sqlite3.connect(":memory:")
+    try:
+        connection.execute("CREATE TABLE used_table (id INTEGER)")
+        connection.execute("CREATE TABLE frpm (id INTEGER)")
+        connection.execute(mutant_sql).fetchall()
+    finally:
+        connection.close()
+
+
 @pytest.mark.parametrize(
     "rule_id",
     ["a_subq_corr_drop", "b_subq_scope_typo"],

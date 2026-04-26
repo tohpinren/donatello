@@ -20,6 +20,7 @@ from sqlmt.pipeline import (
     run_equivalence_filtering,
     run_mutation_generation,
     run_normalization,
+    run_sqlite_execution,
 )
 
 app = typer.Typer(
@@ -210,6 +211,7 @@ def run(
     normalization_summary = None
     mutation_summary = None
     equivalence_summary = None
+    execution_summary = None
 
     try:
         if loaded.stages.normalize:
@@ -226,6 +228,11 @@ def run(
             )
         if loaded.stages.equivalence:
             equivalence_summary = run_equivalence_filtering(
+                loaded,
+                artifacts=artifacts,
+            )
+        if loaded.stages.execute:
+            execution_summary = run_sqlite_execution(
                 loaded,
                 artifacts=artifacts,
             )
@@ -269,16 +276,39 @@ def run(
         )
         typer.echo(f"Wrote: {equivalence_summary.output_path}")
 
+    if execution_summary is not None:
+        action = (
+            "Reused execution" if execution_summary.resumed else "Executed"
+        )
+        score = (
+            f"{execution_summary.mutation_score:.4f}"
+            if execution_summary.mutation_score is not None
+            else "n/a"
+        )
+        typer.echo(
+            f"{action} {execution_summary.executed_count} retained mutants: "
+            f"{execution_summary.killed_count} killed, "
+            f"{execution_summary.survived_count} survived, "
+            f"{execution_summary.timeout_count} timeout, "
+            f"{execution_summary.error_count} error, "
+            f"mutation score {score}."
+        )
+        typer.echo(f"Wrote: {execution_summary.output_path}")
+
     skipped_stages = (
-        equivalence_summary.skipped_stages
-        if equivalence_summary is not None
+        execution_summary.skipped_stages
+        if execution_summary is not None
         else (
-            mutation_summary.skipped_stages
-            if mutation_summary is not None
+            equivalence_summary.skipped_stages
+            if equivalence_summary is not None
             else (
-                normalization_summary.skipped_stages
-                if normalization_summary is not None
-                else []
+                mutation_summary.skipped_stages
+                if mutation_summary is not None
+                else (
+                    normalization_summary.skipped_stages
+                    if normalization_summary is not None
+                    else []
+                )
             )
         )
     )

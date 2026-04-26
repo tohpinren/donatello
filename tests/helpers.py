@@ -182,8 +182,10 @@ def write_config(
     normalize: bool = True,
     mutate: bool = False,
     equivalence: bool = False,
+    execute: bool = False,
     resume: bool = True,
     overwrite: bool = False,
+    sqlite_seconds: int = 120,
     verieql_path: Path | None = None,
     verieql_python: Path | None = None,
 ) -> Path:
@@ -206,10 +208,13 @@ stages:
   normalize: {str(normalize).lower()}
   mutate: {str(mutate).lower()}
   equivalence: {str(equivalence).lower()}
-  execute: false
+  execute: {str(execute).lower()}
   counterexamples: false
   augment: false
   report: false
+
+timeouts:
+  sqlite_seconds: {sqlite_seconds}
 
 tools:
   verieql_path: {verieql_path_value}
