@@ -23,12 +23,13 @@ What works today:
 
 - BIRD benchmark normalization for `dev`, `train`, and `full`
 - canonical mutation generation with all 19 mutation rules
+- VeriEQL equivalence filtering with explicit proven equivalent, proven
+  non-equivalent, timeout, unsupported, and error outcomes
 - resumable artifact-based runs driven by YAML config files
 - `uv`-managed Python environment with Ruff, Ty, and pytest
 
 What is planned next:
 
-- VeriEQL equivalence filtering
 - SQLite execution and mutation scoring
 - SQLDriller counterexample generation
 - Spider 2.0 SQLite-subset normalization
@@ -70,32 +71,19 @@ uv run sqlmt check-env --config configs/smoke/bird-dev.yaml
 ### VeriEQL Setup
 
 VeriEQL is an external solver dependency and is not vendored into this
-repository. Keep it in its own checkout and Python environment.
-
-Local development setup:
-
-```bash
-git clone https://github.com/VeriEQL/VeriEQL.git /Users/tohpinren/Repos/VeriEQL
-python3.11 -m venv /Users/tohpinren/Repos/VeriEQL/.venv
-/Users/tohpinren/Repos/VeriEQL/.venv/bin/pip install -r /Users/tohpinren/Repos/VeriEQL/requirements.txt
-/Users/tohpinren/Repos/VeriEQL/.venv/bin/pip install --force-reinstall 'z3-solver==4.15.0.0'
-cp /Users/tohpinren/Repos/VeriEQL/z3py_libs/*.py /Users/tohpinren/Repos/VeriEQL/.venv/lib/python3.11/site-packages/z3/
-
-export VERIEQL_ROOT=/Users/tohpinren/Repos/VeriEQL
-export VERIEQL_PYTHON=/Users/tohpinren/Repos/VeriEQL/.venv/bin/python
-```
-
-Remote server setup follows the same pattern:
+repository. Keep it in its own checkout and Python environment. The paths below
+are examples; use the same environment variables in your experiment config.
 
 ```bash
-git clone https://github.com/VeriEQL/VeriEQL.git ~/tools/VeriEQL
-python3.11 -m venv ~/venvs/verieql
-~/venvs/verieql/bin/pip install -r ~/tools/VeriEQL/requirements.txt
-~/venvs/verieql/bin/pip install --force-reinstall 'z3-solver==4.15.0.0'
-cp ~/tools/VeriEQL/z3py_libs/*.py ~/venvs/verieql/lib/python3.11/site-packages/z3/
-
 export VERIEQL_ROOT=~/tools/VeriEQL
 export VERIEQL_PYTHON=~/venvs/verieql/bin/python
+
+git clone https://github.com/VeriEQL/VeriEQL.git "$VERIEQL_ROOT"
+mkdir -p "$(dirname "$(dirname "$VERIEQL_PYTHON")")"
+python3.11 -m venv "$(dirname "$VERIEQL_PYTHON")/.."
+"$VERIEQL_PYTHON" -m pip install -r "$VERIEQL_ROOT/requirements.txt"
+"$VERIEQL_PYTHON" -m pip install --force-reinstall 'z3-solver==4.15.0.0'
+cp "$VERIEQL_ROOT"/z3py_libs/*.py "$(dirname "$VERIEQL_PYTHON")/../lib/python3.11/site-packages/z3/"
 ```
 
 The pipeline runs VeriEQL from that checkout as
@@ -231,42 +219,6 @@ tools:
 
 Use [`configs/templates/local.yaml.example`](configs/templates/local.yaml.example)
 as the starting point for machine-specific configs.
-
-## Remote Experiment Runs
-
-The repository is designed for SSH-based runs on servers such as the NUS
-machine. Keep benchmark data, solver checkouts, generated databases, and output
-artifacts outside git.
-
-Typical remote setup:
-
-```bash
-git clone <repo-url> ~/sql-mutation-testing
-cd ~/sql-mutation-testing
-./scripts/bootstrap.sh
-
-export BIRD_ROOT=~/data/sqlmt/bird
-export SQLMT_OUTPUT_ROOT=~/scratch/sqlmt-outputs
-export VERIEQL_ROOT=~/tools/VeriEQL
-export VERIEQL_PYTHON=~/venvs/verieql/bin/python
-
-uv run sqlmt check-env --config configs/templates/local.yaml.example
-```
-
-For long-running experiments, use a persistent shell:
-
-```bash
-tmux new -s sqlmt
-uv run sqlmt run --config configs/local/bird-dev-verieql.yaml
-```
-
-Or run detached with `nohup`:
-
-```bash
-nohup uv run sqlmt run --config configs/local/bird-dev-verieql.yaml > run.out 2>&1 &
-```
-
-Set `resume: true` to reuse completed stage artifacts after an interrupted run.
 
 ## Artifacts
 
