@@ -6,7 +6,7 @@ import json
 import sqlite3
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from sqlmt.artifacts import ExperimentArtifacts
 from sqlmt.config import ExperimentConfig
@@ -47,28 +47,26 @@ def run_sqlite_execution(
         existing_records = []
         resumed = False
 
-    if not artifacts.mutants.exists():
-        if resumed:
-            return summarize_execution(
-                existing_records,
-                output_path=artifacts.execution,
-                resumed=True,
-                skipped_stages=_skipped_stages(config),
-            )
-        raise ValueError(
-            "SQLite execution requires mutants.jsonl, but it does not exist."
+    for artifact_path, missing_message in (
+        (
+            artifacts.mutants,
+            "SQLite execution requires mutants.jsonl, but it does not exist.",
+        ),
+        (
+            artifacts.equivalence,
+            "SQLite execution requires equivalence.jsonl, but it does not exist.",
+        ),
+    ):
+        early = _missing_dependency_outcome(
+            artifact_path=artifact_path,
+            resumed=resumed,
+            existing_records=existing_records,
+            output_path=artifacts.execution,
+            config=config,
+            missing_message=missing_message,
         )
-    if not artifacts.equivalence.exists():
-        if resumed:
-            return summarize_execution(
-                existing_records,
-                output_path=artifacts.execution,
-                resumed=True,
-                skipped_stages=_skipped_stages(config),
-            )
-        raise ValueError(
-            "SQLite execution requires equivalence.jsonl, but it does not exist."
-        )
+        if early is not None:
+            return early
 
     mutations = read_mutation_records(artifacts.mutants)
     equivalence_records = read_equivalence_records(artifacts.equivalence)
@@ -191,16 +189,21 @@ def write_execution_records(path: Path, records: list[ExecutionRecord]) -> None:
 
     with path.open("w", encoding="utf-8") as file:
         for record in records:
-            file.write(json.dumps(record.to_dict(), ensure_ascii=True))
-            file.write("\n")
+            _write_execution_jsonl_line(file, record=record)
 
 
 def append_execution_record(path: Path, record: ExecutionRecord) -> None:
     """Append one execution record to a JSONL artifact."""
 
     with path.open("a", encoding="utf-8") as file:
-        file.write(json.dumps(record.to_dict(), ensure_ascii=True))
-        file.write("\n")
+        _write_execution_jsonl_line(file, record=record)
+
+
+def _write_execution_jsonl_line(file: TextIO, *, record: ExecutionRecord) -> None:
+    """Serialize one execution record as a single JSONL line."""
+
+    file.write(json.dumps(record.to_dict(), ensure_ascii=True))
+    file.write("\n")
 
 
 def _record_result(
@@ -239,6 +242,29 @@ def summarize_execution(
         resumed=resumed,
         skipped_stages=list(skipped_stages or []),
     )
+
+
+def _missing_dependency_outcome(
+    *,
+    artifact_path: Path,
+    resumed: bool,
+    existing_records: list[ExecutionRecord],
+    output_path: Path,
+    config: ExperimentConfig,
+    missing_message: str,
+) -> ExecutionSummary | None:
+    """If a required artifact is absent, return a resume summary or raise."""
+
+    if artifact_path.exists():
+        return None
+    if resumed:
+        return summarize_execution(
+            existing_records,
+            output_path=output_path,
+            resumed=True,
+            skipped_stages=_skipped_stages(config),
+        )
+    raise ValueError(missing_message)
 
 
 def _retained_mutations(
