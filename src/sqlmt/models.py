@@ -132,6 +132,13 @@ MutationSkipReason = Literal[
     "same_as_gold",
     "duplicate_sql",
 ]
+EquivalenceOutcome = Literal[
+    "proven_equivalent",
+    "proven_non_equivalent",
+    "timeout",
+    "unsupported",
+    "error",
+]
 
 
 @dataclass(frozen=True)
@@ -213,6 +220,80 @@ class MutationSummary:
     profile: str
     generated_count: int
     skipped_count: int
+    output_path: str
+    resumed: bool = False
+    skipped_stages: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class EquivalenceRecord:
+    """One VeriEQL classification for a generated mutant."""
+
+    mutant_id: str
+    example_id: str
+    outcome: EquivalenceOutcome
+    raw_state: str | None
+    timeout_seconds: int
+    verieql_index: int | None = None
+    times: list[Any] = field(default_factory=list)
+    counterexample_sql: str | None = None
+    error: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, object]:
+        """Serialize the equivalence record into the JSONL artifact shape."""
+
+        return {
+            "mutant_id": self.mutant_id,
+            "example_id": self.example_id,
+            "outcome": self.outcome,
+            "raw_state": self.raw_state,
+            "timeout_seconds": self.timeout_seconds,
+            "verieql_index": self.verieql_index,
+            "times": self.times,
+            "counterexample_sql": self.counterexample_sql,
+            "error": self.error,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, row: dict[str, Any]) -> EquivalenceRecord:
+        """Parse an equivalence record read back from ``equivalence.jsonl``."""
+
+        return cls(
+            mutant_id=str(row["mutant_id"]),
+            example_id=str(row["example_id"]),
+            outcome=cast(EquivalenceOutcome, row["outcome"]),
+            raw_state=(
+                str(row["raw_state"]) if row.get("raw_state") is not None else None
+            ),
+            timeout_seconds=int(row["timeout_seconds"]),
+            verieql_index=(
+                int(row["verieql_index"])
+                if row.get("verieql_index") is not None
+                else None
+            ),
+            times=list(row.get("times", [])),
+            counterexample_sql=(
+                str(row["counterexample_sql"])
+                if row.get("counterexample_sql") is not None
+                else None
+            ),
+            error=str(row["error"]) if row.get("error") is not None else None,
+            metadata=dict(row.get("metadata", {})),
+        )
+
+
+@dataclass(frozen=True)
+class EquivalenceSummary:
+    """High-level counts and output metadata for VeriEQL filtering."""
+
+    checked_count: int
+    proven_equivalent_count: int
+    proven_non_equivalent_count: int
+    timeout_count: int
+    unsupported_count: int
+    error_count: int
     output_path: str
     resumed: bool = False
     skipped_stages: list[str] = field(default_factory=list)

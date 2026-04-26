@@ -23,12 +23,13 @@ What works today:
 
 - BIRD benchmark normalization for `dev`, `train`, and `full`
 - canonical mutation generation with all 19 mutation rules
+- VeriEQL equivalence filtering with explicit proven equivalent, proven
+  non-equivalent, timeout, unsupported, and error outcomes
 - resumable artifact-based runs driven by YAML config files
 - `uv`-managed Python environment with Ruff, Ty, and pytest
 
 What is planned next:
 
-- VeriEQL equivalence filtering
 - SQLite execution and mutation scoring
 - SQLDriller counterexample generation
 - Spider 2.0 SQLite-subset normalization
@@ -64,7 +65,30 @@ You can also run the setup steps directly:
 uv sync
 uv run sqlmt --help
 uv run sqlmt check-env
+uv run sqlmt check-env --config configs/smoke/bird-dev.yaml
 ```
+
+### VeriEQL Setup
+
+VeriEQL is an external solver dependency and is not vendored into this
+repository. Keep it in its own checkout and Python environment. The paths below
+are examples; use the same environment variables in your experiment config.
+
+```bash
+export VERIEQL_ROOT=~/tools/VeriEQL
+export VERIEQL_PYTHON=~/venvs/verieql/bin/python
+
+git clone https://github.com/VeriEQL/VeriEQL.git "$VERIEQL_ROOT"
+mkdir -p "$(dirname "$(dirname "$VERIEQL_PYTHON")")"
+python3.11 -m venv "$(dirname "$VERIEQL_PYTHON")/.."
+"$VERIEQL_PYTHON" -m pip install -r "$VERIEQL_ROOT/requirements.txt"
+"$VERIEQL_PYTHON" -m pip install --force-reinstall 'z3-solver==4.15.0.0'
+cp "$VERIEQL_ROOT"/z3py_libs/*.py "$(dirname "$VERIEQL_PYTHON")/../lib/python3.11/site-packages/z3/"
+```
+
+The pipeline runs VeriEQL from that checkout as
+`$VERIEQL_PYTHON -m parallel.cli_within_timeout` with the working directory set
+to `$VERIEQL_ROOT`.
 
 ## Benchmark Data Setup
 
@@ -159,7 +183,7 @@ Main fields:
 - `output_dir`: artifact directory for the run
 - `mutation_profile`: currently `canonical`
 - `resume` / `overwrite`: artifact reuse behavior
-- `stages`: enable `normalize` and `mutate` today
+- `stages`: enable `normalize`, `mutate`, and `equivalence` today
 
 Example local config:
 
@@ -177,14 +201,24 @@ overwrite: false
 stages:
   normalize: true
   mutate: true
-  equivalence: false
+  equivalence: true
   execute: false
   counterexamples: false
   augment: false
   report: false
+
+timeouts:
+  verieql_seconds: 120
+  sqldriller_seconds: 300
+
+tools:
+  verieql_path: ${VERIEQL_ROOT}
+  verieql_python: ${VERIEQL_PYTHON}
+  sqldriller_path: null
 ```
 
-Use [`configs/templates/local.yaml.example`](configs/templates/local.yaml.example) as the starting point for machine-specific configs.
+Use [`configs/templates/local.yaml.example`](configs/templates/local.yaml.example)
+as the starting point for machine-specific configs.
 
 ## Artifacts
 
@@ -199,12 +233,19 @@ outputs/
     run.log
     normalized_examples.jsonl
     mutants.jsonl
+    equivalence.jsonl
+    execution.jsonl
+    counterexamples/
+    augmented_databases/
+    report.md
 ```
 
 Current stage behavior:
 
 - normalization writes `normalized_examples.jsonl`
 - mutation generation reads `normalized_examples.jsonl` and writes `mutants.jsonl`
+- equivalence filtering reads `normalized_examples.jsonl` and `mutants.jsonl`,
+  runs VeriEQL, and writes `equivalence.jsonl`
 - `resume: true` reuses existing artifacts
 - `overwrite: true` replaces them
 

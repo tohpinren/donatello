@@ -9,6 +9,7 @@ from pathlib import Path
 from sqlmt.artifacts import ExperimentArtifacts, artifacts_for
 from sqlmt.benchmarks import BenchmarkError, normalize_examples
 from sqlmt.config import ExperimentConfig
+from sqlmt.equivalence import run_equivalence_filtering as _run_equivalence_filtering
 from sqlmt.models import MutationSummary, NormalizationSummary, NormalizedExample
 from sqlmt.mutation.generator import (
     generate_mutations,
@@ -60,10 +61,15 @@ def preflight_run(config: ExperimentConfig) -> None:
         raise PipelineError(
             f"Normalization for benchmark '{config.benchmark}' is not implemented yet."
         )
-    if not config.stages.normalize and not config.stages.mutate:
+    if (
+        not config.stages.normalize
+        and not config.stages.mutate
+        and not config.stages.equivalence
+    ):
         raise PipelineError(
             "No implemented stage is enabled. "
-            "Set stages.normalize: true or stages.mutate: true."
+            "Set stages.normalize: true, stages.mutate: true, "
+            "or stages.equivalence: true."
         )
     if config.stages.mutate and not config.stages.normalize:
         artifacts = artifacts_for(config.output_dir)
@@ -73,6 +79,32 @@ def preflight_run(config: ExperimentConfig) -> None:
                 "stages.normalize is false, but normalized_examples.jsonl "
                 "does not exist."
             )
+    if config.stages.equivalence and not config.stages.mutate:
+        artifacts = artifacts_for(config.output_dir)
+        if not artifacts.mutants.exists():
+            raise PipelineError(
+                "Equivalence filtering requires mutants.jsonl when "
+                "stages.mutate is false, but mutants.jsonl does not exist."
+            )
+        if not artifacts.normalized_examples.exists():
+            raise PipelineError(
+                "Equivalence filtering requires normalized_examples.jsonl when "
+                "stages.normalize is false, but normalized_examples.jsonl "
+                "does not exist."
+            )
+
+
+def run_equivalence_filtering(
+    config: ExperimentConfig,
+    *,
+    artifacts: ExperimentArtifacts,
+):
+    """Execute or resume VeriEQL equivalence filtering."""
+
+    try:
+        return _run_equivalence_filtering(config, artifacts=artifacts)
+    except ValueError as exc:
+        raise PipelineError(str(exc)) from exc
 
 
 def run_mutation_generation(

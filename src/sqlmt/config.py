@@ -62,6 +62,7 @@ class ToolConfig:
     """Optional paths to external non-Python tools."""
 
     verieql_path: Path | None = None
+    verieql_python: Path | None = None
     sqldriller_path: Path | None = None
 
 
@@ -114,6 +115,7 @@ def load_config(path: Path | str) -> ExperimentConfig:
         ),
         tools=ToolConfig(
             verieql_path=_maybe_path(tools.get("verieql_path")),
+            verieql_python=_maybe_path(tools.get("verieql_python")),
             sqldriller_path=_maybe_path(tools.get("sqldriller_path")),
         ),
     )

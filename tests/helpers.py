@@ -181,12 +181,19 @@ def write_config(
     bird_mode: str | None = "dev",
     normalize: bool = True,
     mutate: bool = False,
+    equivalence: bool = False,
     resume: bool = True,
     overwrite: bool = False,
+    verieql_path: Path | None = None,
+    verieql_python: Path | None = None,
 ) -> Path:
     """Write a minimal experiment config tailored for integration tests."""
 
     bird_mode_line = f"bird_mode: {bird_mode}\n" if bird_mode is not None else ""
+    verieql_path_value = str(verieql_path) if verieql_path is not None else "null"
+    verieql_python_value = (
+        str(verieql_python) if verieql_python is not None else "null"
+    )
     path.write_text(
         f"""
 experiment_name: test-run
@@ -198,11 +205,16 @@ overwrite: {str(overwrite).lower()}
 stages:
   normalize: {str(normalize).lower()}
   mutate: {str(mutate).lower()}
-  equivalence: false
+  equivalence: {str(equivalence).lower()}
   execute: false
   counterexamples: false
   augment: false
   report: false
+
+tools:
+  verieql_path: {verieql_path_value}
+  verieql_python: {verieql_python_value}
+  sqldriller_path: null
 """,
         encoding="utf-8",
     )
