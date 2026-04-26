@@ -71,8 +71,9 @@ def b_from_unused_tv(
         return []
 
     referenced = referenced_table_names(select)
-    for table_name in example.schema.table_names:
-        if table_name in referenced:
+    for table_index, table_name in enumerate(example.schema.table_names_original):
+        display_table_name = example.schema.table_names[table_index]
+        if table_name in referenced or display_table_name in referenced:
             continue
         mutated = clone_expression(select)
         mutated.append(
@@ -85,7 +86,12 @@ def b_from_unused_tv(
         return [
             MutationCandidate(
                 mutant_sql=serialize_sql(mutated),
-                metadata={"site_index": 0, "from": None, "to": table_name},
+                metadata={
+                    "site_index": 0,
+                    "from": None,
+                    "to": table_name,
+                    "to_display": display_table_name,
+                },
             )
         ]
     return []
