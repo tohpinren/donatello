@@ -210,6 +210,7 @@ stages:
 
 timeouts:
   verieql_seconds: 120
+  sqlite_seconds: 120
   sqldriller_seconds: 300
 
 tools:
@@ -248,7 +249,8 @@ Current stage behavior:
 - equivalence filtering reads `normalized_examples.jsonl` and `mutants.jsonl`,
   runs VeriEQL, and writes `equivalence.jsonl`
 - SQLite execution reads `mutants.jsonl` and `equivalence.jsonl`, runs only
-  `proven_non_equivalent` mutants, and writes `execution.jsonl`
+  `proven_non_equivalent` mutants, applies `timeouts.sqlite_seconds` per query,
+  and writes `execution.jsonl`
 - `resume: true` reuses existing artifacts
 - `overwrite: true` replaces them
 

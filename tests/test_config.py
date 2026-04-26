@@ -41,6 +41,26 @@ output_dir: outputs/train
     assert config.bird_mode == "train"
 
 
+def test_sqlite_timeout_config_is_loaded(tmp_path: Path) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        """
+experiment_name: sqlite-timeout
+benchmark: bird
+bird_mode: dev
+data_root: /tmp/bird
+output_dir: outputs/sqlite-timeout
+timeouts:
+  sqlite_seconds: 7
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config(path)
+
+    assert config.timeouts.sqlite_seconds == 7
+
+
 def test_spider2_config_does_not_require_bird_mode(tmp_path: Path) -> None:
     path = tmp_path / "config.yaml"
     path.write_text(

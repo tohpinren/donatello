@@ -185,6 +185,7 @@ def write_config(
     execute: bool = False,
     resume: bool = True,
     overwrite: bool = False,
+    sqlite_seconds: int = 120,
     verieql_path: Path | None = None,
     verieql_python: Path | None = None,
 ) -> Path:
@@ -211,6 +212,9 @@ stages:
   counterexamples: false
   augment: false
   report: false
+
+timeouts:
+  sqlite_seconds: {sqlite_seconds}
 
 tools:
   verieql_path: {verieql_path_value}

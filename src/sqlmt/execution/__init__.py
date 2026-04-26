@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 
@@ -55,7 +56,10 @@ def run_sqlite_execution(
     mutations = read_mutation_records(artifacts.mutants)
     equivalence_records = read_equivalence_records(artifacts.equivalence)
     retained = _retained_mutations(mutations, equivalence_records)
-    records = execute_mutations(retained)
+    records = execute_mutations(
+        retained,
+        timeout_seconds=config.timeouts.sqlite_seconds,
+    )
     write_execution_records(artifacts.execution, records)
     return summarize_execution(
         records,
@@ -63,7 +67,11 @@ def run_sqlite_execution(
         skipped_stages=_skipped_stages(config),
     )
 
-def execute_mutations(mutations: list[MutationRecord]) -> list[ExecutionRecord]:
+def execute_mutations(
+    mutations: list[MutationRecord],
+    *,
+    timeout_seconds: int = 120,
+) -> list[ExecutionRecord]:
     """Execute retained mutants and compare them with cached gold SQL results."""
 
     records: list[ExecutionRecord] = []
@@ -77,6 +85,7 @@ def execute_mutations(mutations: list[MutationRecord]) -> list[ExecutionRecord]:
                 gold_cache[cache_key] = _execute_sql(
                     Path(mutation.sqlite_path),
                     mutation.gold_sql,
+                    timeout_seconds=timeout_seconds,
                 )
             gold_rows = gold_cache[cache_key]
         except Exception as exc:
@@ -84,7 +93,11 @@ def execute_mutations(mutations: list[MutationRecord]) -> list[ExecutionRecord]:
             continue
 
         try:
-            mutant_rows = _execute_sql(Path(mutation.sqlite_path), mutation.mutant_sql)
+            mutant_rows = _execute_sql(
+                Path(mutation.sqlite_path),
+                mutation.mutant_sql,
+                timeout_seconds=timeout_seconds,
+            )
         except Exception as exc:
             records.append(_error_record(mutation, "mutant", exc))
             continue
@@ -184,17 +197,35 @@ def _retained_mutations(
     ]
 
 
-def _execute_sql(path: Path, sql: str) -> list[tuple[Any, ...]]:
+def _execute_sql(
+    path: Path,
+    sql: str,
+    *,
+    timeout_seconds: int,
+) -> list[tuple[Any, ...]]:
     """Execute one SQL query against an existing SQLite database."""
 
     if not path.exists():
         raise FileNotFoundError(f"SQLite database does not exist: {path}")
 
+    deadline = time.monotonic() + timeout_seconds
     connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    connection.set_progress_handler(
+        lambda: 1 if time.monotonic() >= deadline else 0,
+        1000,
+    )
     try:
-        cursor = connection.execute(sql)
-        return [tuple(row) for row in cursor.fetchall()]
+        try:
+            cursor = connection.execute(sql)
+            return [tuple(row) for row in cursor.fetchall()]
+        except sqlite3.OperationalError as exc:
+            if str(exc) == "interrupted" and time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"SQLite query timed out after {timeout_seconds} seconds."
+                ) from exc
+            raise
     finally:
+        connection.set_progress_handler(None, 0)
         connection.close()
 
 

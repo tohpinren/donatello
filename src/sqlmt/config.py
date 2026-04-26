@@ -54,6 +54,7 @@ class TimeoutConfig:
     """Timeout settings for external tools used in later stages."""
 
     verieql_seconds: int = 120
+    sqlite_seconds: int = 120
     sqldriller_seconds: int = 300
 
 
@@ -111,6 +112,7 @@ def load_config(path: Path | str) -> ExperimentConfig:
         ),
         timeouts=TimeoutConfig(
             verieql_seconds=_int(timeouts, "verieql_seconds", 120),
+            sqlite_seconds=_int(timeouts, "sqlite_seconds", 120),
             sqldriller_seconds=_int(timeouts, "sqldriller_seconds", 300),
         ),
         tools=ToolConfig(
@@ -145,6 +147,8 @@ def _validate(config: ExperimentConfig) -> None:
         raise ConfigError("workers must be at least 1.")
     if config.timeouts.verieql_seconds < 1:
         raise ConfigError("timeouts.verieql_seconds must be at least 1.")
+    if config.timeouts.sqlite_seconds < 1:
+        raise ConfigError("timeouts.sqlite_seconds must be at least 1.")
     if config.timeouts.sqldriller_seconds < 1:
         raise ConfigError("timeouts.sqldriller_seconds must be at least 1.")
     if config.resume and config.overwrite:

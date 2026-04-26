@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 
 from sqlmt.artifacts import artifacts_for
-from sqlmt.config import ExperimentConfig, StageConfig
+from sqlmt.config import ExperimentConfig, StageConfig, TimeoutConfig
 from sqlmt.equivalence import write_equivalence_records
 from sqlmt.execution import (
     read_execution_records,
@@ -111,6 +111,42 @@ def test_sqlite_execution_classifies_outcomes_and_scores(
     assert rows["gold_error"].error_phase == "gold"
 
 
+def test_sqlite_execution_times_out_long_running_query(tmp_path: Path) -> None:
+    db_path = _write_company_db(tmp_path / "company.sqlite")
+    artifacts = artifacts_for(tmp_path / "outputs")
+    artifacts.ensure_base_dirs()
+    write_mutation_records(
+        artifacts.mutants,
+        [
+            _mutation(
+                "slow",
+                db_path=db_path,
+                mutant_sql=(
+                    "WITH RECURSIVE cnt(x) AS ("
+                    "SELECT 1 UNION ALL SELECT x + 1 FROM cnt"
+                    ") SELECT x FROM cnt"
+                ),
+            )
+        ],
+    )
+    write_equivalence_records(
+        artifacts.equivalence,
+        [_equivalence("slow", "proven_non_equivalent")],
+    )
+
+    summary = run_sqlite_execution(
+        _config(tmp_path, sqlite_seconds=1),
+        artifacts=artifacts,
+    )
+
+    assert summary.executed_count == 1
+    assert summary.error_count == 1
+    rows = read_execution_records(artifacts.execution)
+    assert rows[0].outcome == "error"
+    assert rows[0].error_phase == "mutant"
+    assert "timed out" in (rows[0].error or "")
+
+
 def test_sqlite_execution_resumes_existing_artifact(tmp_path: Path) -> None:
     artifacts = artifacts_for(tmp_path / "outputs")
     artifacts.ensure_base_dirs()
@@ -203,6 +239,7 @@ def _config(
     *,
     resume: bool = True,
     overwrite: bool = False,
+    sqlite_seconds: int = 120,
 ) -> ExperimentConfig:
     return ExperimentConfig(
         experiment_name="test",
@@ -212,6 +249,7 @@ def _config(
         output_dir=tmp_path / "outputs",
         resume=resume,
         overwrite=overwrite,
+        timeouts=TimeoutConfig(sqlite_seconds=sqlite_seconds),
         stages=StageConfig(
             normalize=False,
             mutate=False,
