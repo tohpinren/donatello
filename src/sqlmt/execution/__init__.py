@@ -84,7 +84,6 @@ def run_sqlite_execution(
         output_path=artifacts.execution,
     )
     records = existing_records + new_records
-    write_execution_records(artifacts.execution, records)
     return summarize_execution(
         records,
         output_path=artifacts.execution,

@@ -270,6 +270,43 @@ def test_sqlite_execution_resumes_partial_artifact(
     assert [row.outcome for row in rows] == ["survived", "killed"]
 
 
+def test_sqlite_execution_does_not_rewrite_checkpointed_artifact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = _write_company_db(tmp_path / "company.sqlite")
+    artifacts = artifacts_for(tmp_path / "outputs")
+    artifacts.ensure_base_dirs()
+    write_mutation_records(
+        artifacts.mutants,
+        [
+            _mutation(
+                "m1",
+                db_path=db_path,
+                mutant_sql="SELECT name FROM employees WHERE id = 1 ORDER BY id",
+            )
+        ],
+    )
+    write_equivalence_records(
+        artifacts.equivalence,
+        [_equivalence("m1", "proven_non_equivalent")],
+    )
+
+    def fail_rewrite(path: Path, records: list[ExecutionRecord]) -> None:
+        raise AssertionError("execution artifact should not be rewritten")
+
+    monkeypatch.setattr(execution, "write_execution_records", fail_rewrite)
+
+    summary = run_sqlite_execution(
+        _config(tmp_path, resume=False),
+        artifacts=artifacts,
+    )
+
+    assert summary.executed_count == 1
+    rows = read_execution_records(artifacts.execution)
+    assert [row.mutant_id for row in rows] == ["m1"]
+
+
 def test_sqlite_execution_resumes_existing_artifact(tmp_path: Path) -> None:
     artifacts = artifacts_for(tmp_path / "outputs")
     artifacts.ensure_base_dirs()
