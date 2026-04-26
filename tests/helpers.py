@@ -182,6 +182,7 @@ def write_config(
     normalize: bool = True,
     mutate: bool = False,
     equivalence: bool = False,
+    execute: bool = False,
     resume: bool = True,
     overwrite: bool = False,
     verieql_path: Path | None = None,
@@ -206,7 +207,7 @@ stages:
   normalize: {str(normalize).lower()}
   mutate: {str(mutate).lower()}
   equivalence: {str(equivalence).lower()}
-  execute: false
+  execute: {str(execute).lower()}
   counterexamples: false
   augment: false
   report: false

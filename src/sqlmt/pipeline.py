@@ -10,7 +10,13 @@ from sqlmt.artifacts import ExperimentArtifacts, artifacts_for
 from sqlmt.benchmarks import BenchmarkError, normalize_examples
 from sqlmt.config import ExperimentConfig
 from sqlmt.equivalence import run_equivalence_filtering as _run_equivalence_filtering
-from sqlmt.models import MutationSummary, NormalizationSummary, NormalizedExample
+from sqlmt.execution import run_sqlite_execution as _run_sqlite_execution
+from sqlmt.models import (
+    ExecutionSummary,
+    MutationSummary,
+    NormalizationSummary,
+    NormalizedExample,
+)
 from sqlmt.mutation.generator import (
     generate_mutations,
     read_mutation_records,
@@ -65,11 +71,12 @@ def preflight_run(config: ExperimentConfig) -> None:
         not config.stages.normalize
         and not config.stages.mutate
         and not config.stages.equivalence
+        and not config.stages.execute
     ):
         raise PipelineError(
             "No implemented stage is enabled. "
             "Set stages.normalize: true, stages.mutate: true, "
-            "or stages.equivalence: true."
+            "stages.equivalence: true, or stages.execute: true."
         )
     if config.stages.mutate and not config.stages.normalize:
         artifacts = artifacts_for(config.output_dir)
@@ -92,6 +99,18 @@ def preflight_run(config: ExperimentConfig) -> None:
                 "stages.normalize is false, but normalized_examples.jsonl "
                 "does not exist."
             )
+    if config.stages.execute and not config.stages.equivalence:
+        artifacts = artifacts_for(config.output_dir)
+        if not artifacts.mutants.exists():
+            raise PipelineError(
+                "SQLite execution requires mutants.jsonl when "
+                "stages.mutate is false, but mutants.jsonl does not exist."
+            )
+        if not artifacts.equivalence.exists():
+            raise PipelineError(
+                "SQLite execution requires equivalence.jsonl when "
+                "stages.equivalence is false, but equivalence.jsonl does not exist."
+            )
 
 
 def run_equivalence_filtering(
@@ -103,6 +122,19 @@ def run_equivalence_filtering(
 
     try:
         return _run_equivalence_filtering(config, artifacts=artifacts)
+    except ValueError as exc:
+        raise PipelineError(str(exc)) from exc
+
+
+def run_sqlite_execution(
+    config: ExperimentConfig,
+    *,
+    artifacts: ExperimentArtifacts,
+) -> ExecutionSummary:
+    """Execute or resume SQLite mutation testing."""
+
+    try:
+        return _run_sqlite_execution(config, artifacts=artifacts)
     except ValueError as exc:
         raise PipelineError(str(exc)) from exc
 
