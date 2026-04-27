@@ -183,11 +183,14 @@ def write_config(
     mutate: bool = False,
     equivalence: bool = False,
     execute: bool = False,
+    counterexamples: bool = False,
     resume: bool = True,
     overwrite: bool = False,
     sqlite_seconds: int = 120,
     verieql_path: Path | None = None,
     verieql_python: Path | None = None,
+    sqldriller_path: Path | None = None,
+    sqldriller_python: Path | None = None,
 ) -> Path:
     """Write a minimal experiment config tailored for integration tests."""
 
@@ -195,6 +198,12 @@ def write_config(
     verieql_path_value = str(verieql_path) if verieql_path is not None else "null"
     verieql_python_value = (
         str(verieql_python) if verieql_python is not None else "null"
+    )
+    sqldriller_path_value = (
+        str(sqldriller_path) if sqldriller_path is not None else "null"
+    )
+    sqldriller_python_value = (
+        str(sqldriller_python) if sqldriller_python is not None else "null"
     )
     path.write_text(
         f"""
@@ -209,7 +218,7 @@ stages:
   mutate: {str(mutate).lower()}
   equivalence: {str(equivalence).lower()}
   execute: {str(execute).lower()}
-  counterexamples: false
+  counterexamples: {str(counterexamples).lower()}
   augment: false
   report: false
 
@@ -219,7 +228,8 @@ timeouts:
 tools:
   verieql_path: {verieql_path_value}
   verieql_python: {verieql_python_value}
-  sqldriller_path: null
+  sqldriller_path: {sqldriller_path_value}
+  sqldriller_python: {sqldriller_python_value}
 """,
         encoding="utf-8",
     )
