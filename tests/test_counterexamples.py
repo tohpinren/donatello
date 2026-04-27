@@ -15,6 +15,7 @@ from sqlmt.models import (
     CounterexampleRecord,
     EquivalenceOutcome,
     EquivalenceRecord,
+    ExecutionOutcome,
     ExecutionRecord,
     MutationRecord,
 )
@@ -71,7 +72,10 @@ def test_counterexample_generation_runs_only_survived_proven_non_equivalent_muta
         timeout: int,
     ) -> subprocess.CompletedProcess[str]:
         result_path = Path(command[command.index("--result-json") + 1])
-        mutant_id = str(json.loads(Path(command[command.index("--request-json") + 1]).read_text(encoding="utf-8"))["mutant_id"])
+        request_path = Path(command[command.index("--request-json") + 1])
+        mutant_id = str(
+            json.loads(request_path.read_text(encoding="utf-8"))["mutant_id"]
+        )
         seen.append(mutant_id)
         result_path.write_text(
             json.dumps({"raw_tag": 0, "counterexample_path": str(cwd / "ce.sqlite")}),
@@ -139,7 +143,9 @@ def test_counterexample_generation_maps_outcomes(tmp_path: Path) -> None:
     ) -> subprocess.CompletedProcess[str]:
         request_path = Path(command[command.index("--request-json") + 1])
         result_path = Path(command[command.index("--result-json") + 1])
-        mutant_id = str(json.loads(request_path.read_text(encoding="utf-8"))["mutant_id"])
+        mutant_id = str(
+            json.loads(request_path.read_text(encoding="utf-8"))["mutant_id"]
+        )
         if mutant_id == "timeout":
             raise subprocess.TimeoutExpired(command, timeout)
         if mutant_id == "failure":
@@ -166,7 +172,9 @@ def test_counterexample_generation_maps_outcomes(tmp_path: Path) -> None:
     assert summary.error_count == 1
     rows = {
         row.mutant_id: row
-        for row in counterexamples.read_counterexample_records(artifacts.counterexamples)
+        for row in counterexamples.read_counterexample_records(
+            artifacts.counterexamples
+        )
     }
     assert rows["generated"].outcome == "generated"
     assert rows["generated"].counterexample_path is not None
@@ -214,7 +222,9 @@ def test_counterexample_generation_resumes_partial_artifact(
     ) -> subprocess.CompletedProcess[str]:
         request_path = Path(command[command.index("--request-json") + 1])
         result_path = Path(command[command.index("--result-json") + 1])
-        mutant_id = str(json.loads(request_path.read_text(encoding="utf-8"))["mutant_id"])
+        mutant_id = str(
+            json.loads(request_path.read_text(encoding="utf-8"))["mutant_id"]
+        )
         if mutant_id == "pending":
             raise KeyboardInterrupt
         result_path.write_text(
@@ -232,7 +242,9 @@ def test_counterexample_generation_resumes_partial_artifact(
 
     assert [
         row.mutant_id
-        for row in counterexamples.read_counterexample_records(artifacts.counterexamples)
+        for row in counterexamples.read_counterexample_records(
+            artifacts.counterexamples
+        )
     ] == ["done"]
 
     seen: list[str] = []
@@ -245,7 +257,9 @@ def test_counterexample_generation_resumes_partial_artifact(
     ) -> subprocess.CompletedProcess[str]:
         request_path = Path(command[command.index("--request-json") + 1])
         result_path = Path(command[command.index("--result-json") + 1])
-        mutant_id = str(json.loads(request_path.read_text(encoding="utf-8"))["mutant_id"])
+        mutant_id = str(
+            json.loads(request_path.read_text(encoding="utf-8"))["mutant_id"]
+        )
         seen.append(mutant_id)
         result_path.write_text(
             json.dumps({"raw_tag": 0, "counterexample_path": str(cwd / "ce.sqlite")}),
@@ -387,7 +401,12 @@ def _equivalence(mutant_id: str, outcome: EquivalenceOutcome) -> EquivalenceReco
     )
 
 
-def _execution(mutant_id: str, outcome: str, *, db_path: Path) -> ExecutionRecord:
+def _execution(
+    mutant_id: str,
+    outcome: ExecutionOutcome,
+    *,
+    db_path: Path,
+) -> ExecutionRecord:
     return ExecutionRecord(
         mutant_id=mutant_id,
         example_id="bird:dev:000000",

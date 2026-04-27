@@ -65,6 +65,7 @@ class ToolConfig:
     verieql_path: Path | None = None
     verieql_python: Path | None = None
     sqldriller_path: Path | None = None
+    sqldriller_python: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -119,6 +120,7 @@ def load_config(path: Path | str) -> ExperimentConfig:
             verieql_path=_maybe_path(tools.get("verieql_path")),
             verieql_python=_maybe_path(tools.get("verieql_python")),
             sqldriller_path=_maybe_path(tools.get("sqldriller_path")),
+            sqldriller_python=_maybe_path(tools.get("sqldriller_python")),
         ),
     )
     _validate(config)

@@ -11,7 +11,13 @@ from sqlmt.artifacts import artifacts_for
 from sqlmt.cli import app
 from sqlmt.equivalence import write_equivalence_records
 from sqlmt.execution import write_execution_records
-from sqlmt.models import EquivalenceOutcome, EquivalenceRecord, ExecutionRecord, MutationRecord
+from sqlmt.models import (
+    EquivalenceOutcome,
+    EquivalenceRecord,
+    ExecutionOutcome,
+    ExecutionRecord,
+    MutationRecord,
+)
 from sqlmt.mutation.generator import write_mutation_records
 from tests.helpers import write_bird_fixture, write_config
 
@@ -152,7 +158,12 @@ def _equivalence(mutant_id: str, outcome: EquivalenceOutcome) -> EquivalenceReco
     )
 
 
-def _execution(mutant_id: str, outcome: str, *, db_path: Path) -> ExecutionRecord:
+def _execution(
+    mutant_id: str,
+    outcome: ExecutionOutcome,
+    *,
+    db_path: Path,
+) -> ExecutionRecord:
     return ExecutionRecord(
         mutant_id=mutant_id,
         example_id="bird:dev:000000",

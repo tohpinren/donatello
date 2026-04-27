@@ -17,6 +17,7 @@ from sqlmt.pipeline import (
     build_dry_run_plan,
     preflight_run,
     prepare_run,
+    run_counterexample_generation,
     run_equivalence_filtering,
     run_mutation_generation,
     run_normalization,
@@ -119,6 +120,12 @@ def check_env(
             loaded.tools.sqldriller_path,
             must_exist=True,
         )
+    if loaded.tools.sqldriller_python is not None:
+        _check_path(
+            "tools.sqldriller_python",
+            loaded.tools.sqldriller_python,
+            must_exist=True,
+        )
 
 
 def _check_path(name: str, path: Path, *, must_exist: bool) -> None:
@@ -212,6 +219,7 @@ def run(
     mutation_summary = None
     equivalence_summary = None
     execution_summary = None
+    counterexample_summary = None
 
     try:
         if loaded.stages.normalize:
@@ -233,6 +241,11 @@ def run(
             )
         if loaded.stages.execute:
             execution_summary = run_sqlite_execution(
+                loaded,
+                artifacts=artifacts,
+            )
+        if loaded.stages.counterexamples:
+            counterexample_summary = run_counterexample_generation(
                 loaded,
                 artifacts=artifacts,
             )
@@ -295,19 +308,39 @@ def run(
         )
         typer.echo(f"Wrote: {execution_summary.output_path}")
 
+    if counterexample_summary is not None:
+        action = (
+            "Reused counterexamples"
+            if counterexample_summary.resumed
+            else "Generated counterexamples"
+        )
+        typer.echo(
+            f"{action} for {counterexample_summary.selected_count} retained "
+            f"survivors: {counterexample_summary.generated_count} generated, "
+            f"{counterexample_summary.not_generated_count} not generated, "
+            f"{counterexample_summary.timeout_count} timeout, "
+            f"{counterexample_summary.error_count} error."
+        )
+        typer.echo(f"Wrote: {counterexample_summary.output_path}")
+        typer.echo(f"Counterexample files: {counterexample_summary.output_dir}")
+
     skipped_stages = (
-        execution_summary.skipped_stages
-        if execution_summary is not None
+        counterexample_summary.skipped_stages
+        if counterexample_summary is not None
         else (
-            equivalence_summary.skipped_stages
-            if equivalence_summary is not None
+            execution_summary.skipped_stages
+            if execution_summary is not None
             else (
-                mutation_summary.skipped_stages
-                if mutation_summary is not None
+                equivalence_summary.skipped_stages
+                if equivalence_summary is not None
                 else (
-                    normalization_summary.skipped_stages
-                    if normalization_summary is not None
-                    else []
+                    mutation_summary.skipped_stages
+                    if mutation_summary is not None
+                    else (
+                        normalization_summary.skipped_stages
+                        if normalization_summary is not None
+                        else []
+                    )
                 )
             )
         )

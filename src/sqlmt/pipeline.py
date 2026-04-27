@@ -9,9 +9,13 @@ from pathlib import Path
 from sqlmt.artifacts import ExperimentArtifacts, artifacts_for
 from sqlmt.benchmarks import BenchmarkError, normalize_examples
 from sqlmt.config import ExperimentConfig
+from sqlmt.counterexamples import (
+    run_counterexample_generation as _run_counterexample_generation,
+)
 from sqlmt.equivalence import run_equivalence_filtering as _run_equivalence_filtering
 from sqlmt.execution import run_sqlite_execution as _run_sqlite_execution
 from sqlmt.models import (
+    CounterexampleSummary,
     ExecutionSummary,
     MutationSummary,
     NormalizationSummary,
@@ -72,11 +76,13 @@ def preflight_run(config: ExperimentConfig) -> None:
         and not config.stages.mutate
         and not config.stages.equivalence
         and not config.stages.execute
+        and not config.stages.counterexamples
     ):
         raise PipelineError(
             "No implemented stage is enabled. "
             "Set stages.normalize: true, stages.mutate: true, "
-            "stages.equivalence: true, or stages.execute: true."
+            "stages.equivalence: true, stages.execute: true, "
+            "or stages.counterexamples: true."
         )
     if config.stages.mutate and not config.stages.normalize:
         artifacts = artifacts_for(config.output_dir)
@@ -111,6 +117,23 @@ def preflight_run(config: ExperimentConfig) -> None:
                 "SQLite execution requires equivalence.jsonl when "
                 "stages.equivalence is false, but equivalence.jsonl does not exist."
             )
+    if config.stages.counterexamples:
+        artifacts = artifacts_for(config.output_dir)
+        if not config.stages.mutate and not artifacts.mutants.exists():
+            raise PipelineError(
+                "Counterexample generation requires mutants.jsonl when "
+                "stages.mutate is false, but mutants.jsonl does not exist."
+            )
+        if not config.stages.equivalence and not artifacts.equivalence.exists():
+            raise PipelineError(
+                "Counterexample generation requires equivalence.jsonl when "
+                "stages.equivalence is false, but equivalence.jsonl does not exist."
+            )
+        if not config.stages.execute and not artifacts.execution.exists():
+            raise PipelineError(
+                "Counterexample generation requires execution.jsonl when "
+                "stages.execute is false, but execution.jsonl does not exist."
+            )
 
 
 def run_equivalence_filtering(
@@ -135,6 +158,19 @@ def run_sqlite_execution(
 
     try:
         return _run_sqlite_execution(config, artifacts=artifacts)
+    except ValueError as exc:
+        raise PipelineError(str(exc)) from exc
+
+
+def run_counterexample_generation(
+    config: ExperimentConfig,
+    *,
+    artifacts: ExperimentArtifacts,
+) -> CounterexampleSummary:
+    """Execute or resume SQLDriller counterexample generation."""
+
+    try:
+        return _run_counterexample_generation(config, artifacts=artifacts)
     except ValueError as exc:
         raise PipelineError(str(exc)) from exc
 
