@@ -27,12 +27,13 @@ What works today:
   non-equivalent, timeout, unsupported, and error outcomes
 - SQLite execution for retained proven non-equivalent mutants, with killed,
   survived, timeout, error, and mutation-score outputs
+- SQLDriller counterexample generation for survived proven non-equivalent
+  mutants, using SQLDriller `exec` mode only
 - resumable artifact-based runs driven by YAML config files
 - `uv`-managed Python environment with Ruff, Ty, and pytest
 
 What is planned next:
 
-- SQLDriller counterexample generation
 - Spider 2.0 SQLite-subset normalization
 - reporting and benchmark augmentation
 
@@ -90,6 +91,25 @@ cp "$VERIEQL_ROOT"/z3py_libs/*.py "$(dirname "$VERIEQL_PYTHON")/../lib/python3.1
 The pipeline runs VeriEQL from that checkout as
 `$VERIEQL_PYTHON -m parallel.cli_within_timeout` with the working directory set
 to `$VERIEQL_ROOT`.
+
+### SQLDriller Setup
+
+SQLDriller is also an external dependency and is not vendored into this
+repository. Keep it in its own checkout and Python environment.
+
+```bash
+export SQLDRILLER_ROOT=~/tools/SQLDriller
+export SQLDRILLER_PYTHON=~/venvs/sqldriller/bin/python
+
+git clone https://github.com/SJTU-IPADS/SQLDriller.git "$SQLDRILLER_ROOT"
+python3.11 -m venv "$(dirname "$SQLDRILLER_PYTHON")/.."
+"$SQLDRILLER_PYTHON" -m pip install -r "$SQLDRILLER_ROOT/requirements.txt"
+```
+
+Stage 6 uses SQLDriller `exec` mode only through a thin repo-owned adapter. It
+does not integrate SQLSolver/Java for this stage. Counterexample generation
+stops at `counterexamples.jsonl` plus generated SQLite files; augmentation-time
+validation is deferred to the next stage.
 
 ## Benchmark Data Setup
 
@@ -184,7 +204,8 @@ Main fields:
 - `output_dir`: artifact directory for the run
 - `mutation_profile`: currently `canonical`
 - `resume` / `overwrite`: artifact reuse behavior
-- `stages`: enable `normalize`, `mutate`, `equivalence`, and `execute` today
+- `stages`: enable `normalize`, `mutate`, `equivalence`, `execute`, and
+  `counterexamples` today
 
 Example local config:
 
@@ -216,7 +237,8 @@ timeouts:
 tools:
   verieql_path: ${VERIEQL_ROOT}
   verieql_python: ${VERIEQL_PYTHON}
-  sqldriller_path: null
+  sqldriller_path: ${SQLDRILLER_ROOT}
+  sqldriller_python: ${SQLDRILLER_PYTHON}
 ```
 
 Use [`configs/templates/local.yaml.example`](configs/templates/local.yaml.example)
@@ -237,6 +259,7 @@ outputs/
     mutants.jsonl
     equivalence.jsonl
     execution.jsonl
+    counterexamples.jsonl
     counterexamples/
     augmented_databases/
     report.md
@@ -251,6 +274,11 @@ Current stage behavior:
 - SQLite execution reads `mutants.jsonl` and `equivalence.jsonl`, runs only
   `proven_non_equivalent` mutants, applies `timeouts.sqlite_seconds` per query,
   and writes `execution.jsonl`
+- counterexample generation reads `mutants.jsonl`, `equivalence.jsonl`, and
+  `execution.jsonl`, runs only `survived` plus `proven_non_equivalent` mutants,
+  uses SQLDriller `exec` mode only, writes `counterexamples.jsonl`, and stores
+  minimized SQLite files under `counterexamples/`
+- augmentation-time validation is deferred to the next stage
 - `resume: true` reuses existing artifacts
 - `overwrite: true` replaces them
 
