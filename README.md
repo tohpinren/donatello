@@ -278,7 +278,6 @@ Current stage behavior:
   `execution.jsonl`, runs only `survived` plus `proven_non_equivalent` mutants,
   uses SQLDriller `exec` mode only, writes `counterexamples.jsonl`, and stores
   minimized SQLite files under `counterexamples/`
-- augmentation-time validation is deferred to the next stage
 - `resume: true` reuses existing artifacts
 - `overwrite: true` replaces them
 
