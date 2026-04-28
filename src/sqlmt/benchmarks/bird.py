@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ SPLIT_FILES: dict[str, dict[str, str]] = {
         "databases": "train_databases",
     },
 }
+LOGGER = logging.getLogger(__name__)
 
 
 class BirdAdapter(BenchmarkAdapter):
@@ -35,6 +37,11 @@ class BirdAdapter(BenchmarkAdapter):
 
         data_root = config.data_root.resolve()
         examples: list[NormalizedExample] = []
+        LOGGER.info(
+            "BIRD normalization start mode=%s data_root=%s",
+            config.bird_mode,
+            data_root,
+        )
 
         for split in _splits_for_mode(config.bird_mode):
             split_dir = data_root / split
@@ -43,6 +50,13 @@ class BirdAdapter(BenchmarkAdapter):
             raw_examples = _load_json_array(examples_path)
             schema_by_db = _load_schema_map(split_dir / layout["tables"])
             db_root = split_dir / layout["databases"]
+            LOGGER.info(
+                "BIRD split loaded split=%s examples=%s schemas=%s db_root=%s",
+                split,
+                len(raw_examples),
+                len(schema_by_db),
+                db_root,
+            )
 
             for index, raw_example in enumerate(raw_examples):
                 examples.append(
@@ -57,6 +71,7 @@ class BirdAdapter(BenchmarkAdapter):
                     )
                 )
 
+        LOGGER.info("BIRD normalization complete examples=%s", len(examples))
         return examples
 
 

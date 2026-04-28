@@ -49,6 +49,12 @@ class ExperimentArtifacts:
         return self.root / "execution.jsonl"
 
     @property
+    def counterexamples(self) -> Path:
+        """Return the reserved path for counterexample manifest results."""
+
+        return self.root / "counterexamples.jsonl"
+
+    @property
     def counterexamples_dir(self) -> Path:
         """Return the directory reserved for generated counterexamples."""
 
@@ -82,6 +88,7 @@ class ExperimentArtifacts:
             "mutants": str(self.mutants),
             "equivalence": str(self.equivalence),
             "execution": str(self.execution),
+            "counterexamples": str(self.counterexamples),
             "counterexamples_dir": str(self.counterexamples_dir),
             "augmented_databases_dir": str(self.augmented_databases_dir),
             "report": str(self.report),

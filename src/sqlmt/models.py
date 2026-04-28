@@ -140,6 +140,7 @@ EquivalenceOutcome = Literal[
     "error",
 ]
 ExecutionOutcome = Literal["killed", "survived", "timeout", "error"]
+CounterexampleOutcome = Literal["generated", "not_generated", "timeout", "error"]
 
 
 @dataclass(frozen=True)
@@ -385,5 +386,80 @@ class ExecutionSummary:
     error_count: int
     mutation_score: float | None
     output_path: str
+    resumed: bool = False
+    skipped_stages: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class CounterexampleRecord:
+    """One SQLDriller counterexample attempt for a surviving mutant."""
+
+    mutant_id: str
+    example_id: str
+    outcome: CounterexampleOutcome
+    gold_sql: str
+    mutant_sql: str
+    source_sqlite_path: str
+    rule: str
+    profile: str
+    counterexample_path: str | None = None
+    raw_tag: int | None = None
+    error: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, object]:
+        """Serialize one counterexample result into the JSONL artifact shape."""
+
+        return {
+            "mutant_id": self.mutant_id,
+            "example_id": self.example_id,
+            "outcome": self.outcome,
+            "gold_sql": self.gold_sql,
+            "mutant_sql": self.mutant_sql,
+            "source_sqlite_path": self.source_sqlite_path,
+            "rule": self.rule,
+            "profile": self.profile,
+            "counterexample_path": self.counterexample_path,
+            "raw_tag": self.raw_tag,
+            "error": self.error,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, row: dict[str, Any]) -> CounterexampleRecord:
+        """Parse a counterexample record read back from ``counterexamples.jsonl``."""
+
+        raw_tag = row.get("raw_tag")
+        return cls(
+            mutant_id=str(row["mutant_id"]),
+            example_id=str(row["example_id"]),
+            outcome=cast(CounterexampleOutcome, row["outcome"]),
+            gold_sql=str(row["gold_sql"]),
+            mutant_sql=str(row["mutant_sql"]),
+            source_sqlite_path=str(row["source_sqlite_path"]),
+            rule=str(row["rule"]),
+            profile=str(row["profile"]),
+            counterexample_path=(
+                str(row["counterexample_path"])
+                if row.get("counterexample_path") is not None
+                else None
+            ),
+            raw_tag=int(raw_tag) if raw_tag is not None else None,
+            error=str(row["error"]) if row.get("error") is not None else None,
+            metadata=dict(row.get("metadata", {})),
+        )
+
+
+@dataclass(frozen=True)
+class CounterexampleSummary:
+    """High-level counts and output metadata for SQLDriller counterexamples."""
+
+    selected_count: int
+    generated_count: int
+    not_generated_count: int
+    timeout_count: int
+    error_count: int
+    output_path: str
+    output_dir: str
     resumed: bool = False
     skipped_stages: list[str] = field(default_factory=list)

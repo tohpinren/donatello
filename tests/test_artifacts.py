@@ -14,6 +14,7 @@ def test_artifact_layout_paths() -> None:
     assert artifacts.mutants == Path("outputs/bird-dev/mutants.jsonl")
     assert artifacts.equivalence == Path("outputs/bird-dev/equivalence.jsonl")
     assert artifacts.execution == Path("outputs/bird-dev/execution.jsonl")
+    assert artifacts.counterexamples == Path("outputs/bird-dev/counterexamples.jsonl")
     assert artifacts.counterexamples_dir == Path("outputs/bird-dev/counterexamples")
     assert artifacts.augmented_databases_dir == Path(
         "outputs/bird-dev/augmented_databases"

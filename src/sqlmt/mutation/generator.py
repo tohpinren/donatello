@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import TypeVar
@@ -20,6 +21,7 @@ from sqlmt.mutation.profile import MutationRule, ensure_rule_sequence
 
 DEFAULT_MAX_GENERATED_MUTANTS_PER_RULE = 3
 RowT = TypeVar("RowT")
+LOGGER = logging.getLogger(__name__)
 
 
 def generate_mutations(
@@ -36,6 +38,14 @@ def generate_mutations(
 
     ordered_rules = ensure_rule_sequence(rules)
     records: list[MutationRecord] = []
+    LOGGER.info(
+        "Generating mutations examples=%s rules=%s profile=%s "
+        "max_generated_per_rule=%s",
+        len(examples),
+        len(ordered_rules),
+        profile,
+        max_generated_per_rule,
+    )
 
     for example in examples:
         try:
@@ -52,6 +62,11 @@ def generate_mutations(
                         "parse_error",
                     )
                 )
+                LOGGER.warning(
+                    "Skipping example due to parse error example_id=%s db_id=%s",
+                    example.example_id,
+                    example.db_id,
+                )
             continue
 
         generated_sqls: set[str] = set()
@@ -59,6 +74,12 @@ def generate_mutations(
             try:
                 candidates = rule.apply(example, parsed)
             except Exception as exc:  # pragma: no cover - defensive isolation
+                LOGGER.warning(
+                    "Mutation rule failed example_id=%s rule=%s error=%s",
+                    example.example_id,
+                    rule.rule_id,
+                    exc,
+                )
                 records.append(
                     _skip_record(
                         example,
@@ -169,6 +190,12 @@ def generate_mutations(
                     )
                 )
 
+    LOGGER.info(
+        "Generated mutation records total=%s generated=%s skipped=%s",
+        len(records),
+        sum(1 for record in records if record.status == "generated"),
+        sum(1 for record in records if record.status == "skipped"),
+    )
     return records
 
 

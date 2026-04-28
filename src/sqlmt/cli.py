@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import shutil
 import sqlite3
 from pathlib import Path
@@ -17,6 +18,7 @@ from sqlmt.pipeline import (
     build_dry_run_plan,
     preflight_run,
     prepare_run,
+    run_counterexample_generation,
     run_equivalence_filtering,
     run_mutation_generation,
     run_normalization,
@@ -29,6 +31,7 @@ app = typer.Typer(
 )
 config_app = typer.Typer(help="Inspect and validate experiment configs.")
 app.add_typer(config_app, name="config")
+LOGGER = logging.getLogger(__name__)
 
 
 def _version_callback(value: bool) -> None:
@@ -119,6 +122,12 @@ def check_env(
             loaded.tools.sqldriller_path,
             must_exist=True,
         )
+    if loaded.tools.sqldriller_python is not None:
+        _check_path(
+            "tools.sqldriller_python",
+            loaded.tools.sqldriller_python,
+            must_exist=True,
+        )
 
 
 def _check_path(name: str, path: Path, *, must_exist: bool) -> None:
@@ -207,36 +216,57 @@ def run(
 
     artifacts = prepare_run(loaded)
     configure_logging(artifacts.run_log)
+    LOGGER.info(
+        "Starting experiment name=%s benchmark=%s mode=%s "
+        "output_dir=%s enabled_stages=%s",
+        loaded.experiment_name,
+        loaded.benchmark,
+        loaded.bird_mode,
+        artifacts.root,
+        ",".join(loaded.stages.enabled()),
+    )
 
     normalization_summary = None
     mutation_summary = None
     equivalence_summary = None
     execution_summary = None
+    counterexample_summary = None
 
     try:
         if loaded.stages.normalize:
+            LOGGER.info("Running stage=normalize")
             normalization_summary = run_normalization(
                 loaded,
                 config_path=config,
                 artifacts=artifacts,
             )
         if loaded.stages.mutate:
+            LOGGER.info("Running stage=mutate")
             mutation_summary = run_mutation_generation(
                 loaded,
                 config_path=config,
                 artifacts=artifacts,
             )
         if loaded.stages.equivalence:
+            LOGGER.info("Running stage=equivalence")
             equivalence_summary = run_equivalence_filtering(
                 loaded,
                 artifacts=artifacts,
             )
         if loaded.stages.execute:
+            LOGGER.info("Running stage=execute")
             execution_summary = run_sqlite_execution(
                 loaded,
                 artifacts=artifacts,
             )
+        if loaded.stages.counterexamples:
+            LOGGER.info("Running stage=counterexamples")
+            counterexample_summary = run_counterexample_generation(
+                loaded,
+                artifacts=artifacts,
+            )
     except PipelineError as exc:
+        LOGGER.exception("Pipeline failed: %s", exc)
         typer.echo(f"Pipeline error: {exc}", err=True)
         raise typer.Exit(code=2) from exc
 
@@ -295,19 +325,41 @@ def run(
         )
         typer.echo(f"Wrote: {execution_summary.output_path}")
 
+    if counterexample_summary is not None:
+        action = (
+            "Reused counterexamples"
+            if counterexample_summary.resumed
+            else "Generated counterexamples"
+        )
+        typer.echo(
+            f"{action} for {counterexample_summary.selected_count} retained "
+            f"survivors: {counterexample_summary.generated_count} generated, "
+            f"{counterexample_summary.not_generated_count} not generated, "
+            f"{counterexample_summary.timeout_count} timeout, "
+            f"{counterexample_summary.error_count} error."
+        )
+        typer.echo(f"Wrote: {counterexample_summary.output_path}")
+        typer.echo(f"Counterexample files: {counterexample_summary.output_dir}")
+
+    LOGGER.info("Experiment completed successfully name=%s", loaded.experiment_name)
+
     skipped_stages = (
-        execution_summary.skipped_stages
-        if execution_summary is not None
+        counterexample_summary.skipped_stages
+        if counterexample_summary is not None
         else (
-            equivalence_summary.skipped_stages
-            if equivalence_summary is not None
+            execution_summary.skipped_stages
+            if execution_summary is not None
             else (
-                mutation_summary.skipped_stages
-                if mutation_summary is not None
+                equivalence_summary.skipped_stages
+                if equivalence_summary is not None
                 else (
-                    normalization_summary.skipped_stages
-                    if normalization_summary is not None
-                    else []
+                    mutation_summary.skipped_stages
+                    if mutation_summary is not None
+                    else (
+                        normalization_summary.skipped_stages
+                        if normalization_summary is not None
+                        else []
+                    )
                 )
             )
         )

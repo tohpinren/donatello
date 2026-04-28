@@ -162,6 +162,113 @@ def test_run_equivalence_filtering_resumes_existing_artifact(
     assert read_equivalence_records(artifacts.equivalence) == existing
 
 
+def test_run_equivalence_filtering_resumes_partial_artifact_and_runs_missing(
+    tmp_path: Path,
+) -> None:
+    artifacts = artifacts_for(tmp_path / "outputs")
+    artifacts.ensure_base_dirs()
+    example = make_normalized_example(
+        "SELECT name FROM employees WHERE salary >= 100",
+    )
+    write_normalized_examples(artifacts.normalized_examples, [example])
+    write_mutation_records(
+        artifacts.mutants,
+        [
+            _mutation(
+                mutant_id="done",
+                gold_sql=example.gold_sql,
+                mutant_sql="SELECT DISTINCT name FROM employees WHERE salary >= 100",
+            ),
+            _mutation(
+                mutant_id="pending",
+                gold_sql=example.gold_sql,
+                mutant_sql="SELECT name FROM employees WHERE salary > 100",
+            ),
+        ],
+    )
+    write_equivalence_records(
+        artifacts.equivalence,
+        [
+            EquivalenceRecord(
+                mutant_id="done",
+                example_id="bird:dev:000000",
+                outcome="proven_equivalent",
+                raw_state="EQU",
+                timeout_seconds=120,
+            )
+        ],
+    )
+
+    summary = run_equivalence_filtering(
+        _config(tmp_path),
+        artifacts=artifacts,
+        runner=_resume_missing_runner,
+    )
+
+    assert summary.resumed is True
+    assert summary.checked_count == 2
+    assert summary.proven_equivalent_count == 1
+    assert summary.proven_non_equivalent_count == 1
+    assert [
+        record.mutant_id
+        for record in read_equivalence_records(artifacts.equivalence)
+    ] == ["done", "pending"]
+
+
+def test_run_equivalence_filtering_salvages_partial_output_on_timeout(
+    tmp_path: Path,
+) -> None:
+    artifacts = artifacts_for(tmp_path / "outputs")
+    artifacts.ensure_base_dirs()
+    example = make_normalized_example(
+        "SELECT name FROM employees WHERE salary >= 100",
+    )
+    write_normalized_examples(artifacts.normalized_examples, [example])
+    write_mutation_records(
+        artifacts.mutants,
+        [
+            _mutation(
+                mutant_id="done",
+                gold_sql=example.gold_sql,
+                mutant_sql="SELECT DISTINCT name FROM employees WHERE salary >= 100",
+            ),
+            _mutation(
+                mutant_id="pending",
+                gold_sql=example.gold_sql,
+                mutant_sql="SELECT name FROM employees WHERE salary > 100",
+            ),
+        ],
+    )
+
+    summary = run_equivalence_filtering(
+        _config(tmp_path),
+        artifacts=artifacts,
+        runner=_timeout_after_partial_output_runner,
+    )
+
+    assert summary.checked_count == 2
+    assert summary.proven_equivalent_count == 1
+    assert summary.timeout_count == 1
+    rows = read_jsonl(artifacts.equivalence)
+    assert rows[0] == {
+        "mutant_id": "done",
+        "example_id": "bird:dev:000000",
+        "outcome": "proven_equivalent",
+        "raw_state": "EQU",
+        "timeout_seconds": 125,
+        "verieql_index": 0,
+        "times": [[0.1, 0.2]],
+        "counterexample_sql": None,
+        "error": None,
+        "metadata": {},
+    }
+    assert rows[1]["mutant_id"] == "pending"
+    assert rows[1]["outcome"] == "timeout"
+    assert rows[1]["raw_state"] == "TMO"
+    assert rows[1]["timeout_seconds"] == 125
+    assert "timed out" in rows[1]["error"]
+
+
 def test_run_equivalence_filtering_requires_tool_config(tmp_path: Path) -> None:
     artifacts = artifacts_for(tmp_path / "outputs")
     artifacts.ensure_base_dirs()
@@ -241,6 +348,61 @@ def _runner_that_should_not_run(
     timeout: int,
 ) -> subprocess.CompletedProcess[str]:
     raise AssertionError("runner should not be called")
+
+
+def _resume_missing_runner(
+    command: list[str],
+    *,
+    cwd: Path,
+    timeout: int,
+) -> subprocess.CompletedProcess[str]:
+    input_path = Path(command[command.index("-f") + 1])
+    output_path = Path(command[command.index("-o") + 1])
+    rows = read_jsonl(input_path)
+    assert [row["file"] for row in rows] == ["pending"]
+    output_path.write_text(
+        json.dumps(
+            {
+                "index": 0,
+                "file": "pending",
+                "states": ["NEQ"],
+                "times": [[0.1, 0.2]],
+                "counterexample": "ce",
+                "err": None,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return subprocess.CompletedProcess(command, 0, "", "")
+
+
+def _timeout_after_partial_output_runner(
+    command: list[str],
+    *,
+    cwd: Path,
+    timeout: int,
+) -> subprocess.CompletedProcess[str]:
+    input_path = Path(command[command.index("-f") + 1])
+    output_path = Path(command[command.index("-o") + 1])
+    rows = read_jsonl(input_path)
+    assert [row["file"] for row in rows] == ["done", "pending"]
+    shard_path = output_path.parent / f"{output_path.name}0"
+    shard_path.write_text(
+        json.dumps(
+            {
+                "index": 0,
+                "file": "done",
+                "states": ["EQU"],
+                "times": [[0.1, 0.2]],
+                "counterexample": None,
+                "err": None,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    raise subprocess.TimeoutExpired(cmd=command, timeout=timeout)
 
 
 def _config(

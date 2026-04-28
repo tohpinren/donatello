@@ -61,6 +61,28 @@ timeouts:
     assert config.timeouts.sqlite_seconds == 7
 
 
+def test_sqldriller_python_config_is_loaded(tmp_path: Path) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        """
+experiment_name: sqldriller-python
+benchmark: bird
+bird_mode: dev
+data_root: /tmp/bird
+output_dir: outputs/sqldriller-python
+tools:
+  sqldriller_path: /tmp/SQLDriller
+  sqldriller_python: /tmp/venvs/sqldriller/bin/python
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config(path)
+
+    assert config.tools.sqldriller_path == Path("/tmp/SQLDriller")
+    assert config.tools.sqldriller_python == Path("/tmp/venvs/sqldriller/bin/python")
+
+
 def test_spider2_config_does_not_require_bird_mode(tmp_path: Path) -> None:
     path = tmp_path / "config.yaml"
     path.write_text(
