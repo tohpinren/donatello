@@ -84,6 +84,8 @@ def run_counterexample_generation(
         raise ValueError(
             "tools.sqldriller_python is required when counterexamples are enabled."
         )
+    sqldriller_path = _require_sqldriller_path(config)
+    sqldriller_python = _require_sqldriller_python(config)
 
     for artifact_path, missing_message in (
         (
@@ -134,6 +136,8 @@ def run_counterexample_generation(
             config=config,
             artifacts=artifacts,
             runner=active_runner,
+            sqldriller_path=sqldriller_path,
+            sqldriller_python=sqldriller_python,
         )
         _record_result(
             new_records,
@@ -220,16 +224,10 @@ def _generate_counterexample(
     config: ExperimentConfig,
     artifacts: ExperimentArtifacts,
     runner: SQLDrillerRunner,
+    sqldriller_path: Path,
+    sqldriller_python: Path,
 ) -> CounterexampleRecord:
     """Run the SQLDriller adapter for one selected mutant."""
-
-    sqldriller_path = config.tools.sqldriller_path
-    sqldriller_python = config.tools.sqldriller_python
-    if sqldriller_path is None or sqldriller_python is None:
-        raise ValueError(
-            "tools.sqldriller_path and tools.sqldriller_python are required "
-            "when counterexamples are enabled."
-        )
 
     with tempfile.TemporaryDirectory(
         prefix="sqldriller-",
@@ -487,6 +485,28 @@ def _adapter_script_path() -> Path:
     """Return the path to the repo-owned SQLDriller adapter script."""
 
     return Path(__file__).with_name("adapter.py")
+
+
+def _require_sqldriller_path(config: ExperimentConfig) -> Path:
+    """Return the validated SQLDriller checkout path."""
+
+    path = config.tools.sqldriller_path
+    if path is None:
+        raise ValueError(
+            "tools.sqldriller_path is required when counterexamples are enabled."
+        )
+    return path
+
+
+def _require_sqldriller_python(config: ExperimentConfig) -> Path:
+    """Return the validated SQLDriller Python path."""
+
+    path = config.tools.sqldriller_python
+    if path is None:
+        raise ValueError(
+            "tools.sqldriller_python is required when counterexamples are enabled."
+        )
+    return path
 
 
 def _error_record(
