@@ -84,13 +84,29 @@ git clone https://github.com/VeriEQL/VeriEQL.git "$VERIEQL_ROOT"
 mkdir -p "$(dirname "$(dirname "$VERIEQL_PYTHON")")"
 python3.11 -m venv "$(dirname "$VERIEQL_PYTHON")/.."
 "$VERIEQL_PYTHON" -m pip install -r "$VERIEQL_ROOT/requirements.txt"
+"$VERIEQL_PYTHON" -m pip install 'setuptools<81'
 "$VERIEQL_PYTHON" -m pip install --force-reinstall 'z3-solver==4.15.0.0'
-cp "$VERIEQL_ROOT"/z3py_libs/*.py "$(dirname "$VERIEQL_PYTHON")/../lib/python3.11/site-packages/z3/"
+"$VERIEQL_PYTHON" - <<'PY'
+import os
+from pathlib import Path
+import shutil
+import z3
+
+site_z3_dir = Path(z3.__file__).resolve().parent
+source_dir = Path(os.environ["VERIEQL_ROOT"]).expanduser() / "z3py_libs"
+for source in source_dir.glob("*.py"):
+    shutil.copy2(source, site_z3_dir / source.name)
+print(f"Patched Z3 Python files in {site_z3_dir}")
+PY
 ```
 
 The pipeline runs VeriEQL from that checkout as
 `$VERIEQL_PYTHON -m parallel.cli_within_timeout` with the working directory set
 to `$VERIEQL_ROOT`.
+
+The extra Z3 patching step is required because VeriEQL relies on its own
+`z3py_libs` Python wrappers, including APIs such as `And(..., ctx=...)` that do
+not work with the stock `z3-solver` Python files alone.
 
 ### SQLDriller Setup
 
@@ -107,9 +123,7 @@ python3.11 -m venv "$(dirname "$SQLDRILLER_PYTHON")/.."
 ```
 
 Stage 6 uses SQLDriller `exec` mode only through a thin repo-owned adapter. It
-does not integrate SQLSolver/Java for this stage. Counterexample generation
-stops at `counterexamples.jsonl` plus generated SQLite files; augmentation-time
-validation is deferred to the next stage.
+does not integrate SQLSolver/Java for this stage.
 
 ## Benchmark Data Setup
 
