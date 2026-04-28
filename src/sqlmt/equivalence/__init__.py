@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 import tempfile
 import time
@@ -52,6 +53,7 @@ _VERIEQL_TYPE_MAP = {
     "varchar": "VARCHAR",
     "string": "VARCHAR",
 }
+LOGGER = logging.getLogger(__name__)
 
 
 def build_verieql_input_rows(
@@ -91,6 +93,15 @@ def run_equivalence_filtering(
 ) -> EquivalenceSummary:
     """Run VeriEQL over generated mutants and persist explicit outcomes."""
 
+    LOGGER.info(
+        "Equivalence stage start mutants=%s normalized_examples=%s "
+        "output=%s resume=%s overwrite=%s",
+        artifacts.mutants,
+        artifacts.normalized_examples,
+        artifacts.equivalence,
+        config.resume,
+        config.overwrite,
+    )
     if artifacts.equivalence.exists():
         if config.resume:
             existing_records = read_equivalence_records(artifacts.equivalence)
@@ -150,7 +161,14 @@ def run_equivalence_filtering(
         for mutation in generated_mutations
         if mutation.mutant_id not in existing_ids
     ]
+    LOGGER.info(
+        "Equivalence selection generated=%s existing=%s pending=%s",
+        len(generated_mutations),
+        len(existing_records),
+        len(pending_mutations),
+    )
     if not pending_mutations:
+        LOGGER.info("Equivalence stage reused existing artifact without pending work.")
         return summarize_equivalence(
             existing_records,
             output_path=artifacts.equivalence,
@@ -181,6 +199,15 @@ def run_equivalence_filtering(
             "-o",
             str(output_path),
         ]
+        LOGGER.info(
+            "Launching VeriEQL cwd=%s timeout_per_pair=%s workers=%s "
+            "batch_pairs=%s temp_dir=%s",
+            config.tools.verieql_path,
+            config.timeouts.verieql_seconds,
+            config.workers,
+            len(pending_mutations),
+            temp_dir,
+        )
         batch_timeout = _subprocess_timeout(
             config.timeouts.verieql_seconds,
             len(pending_mutations),
@@ -207,12 +234,24 @@ def run_equivalence_filtering(
                 artifact_path=artifacts.equivalence,
             )
 
-    return summarize_equivalence(
+    summary = summarize_equivalence(
         existing_records + records,
         output_path=artifacts.equivalence,
         resumed=resumed,
         skipped_stages=_skipped_stages(config),
     )
+    LOGGER.info(
+        "Equivalence stage complete checked=%s proven_equivalent=%s "
+        "proven_non_equivalent=%s timeout=%s unsupported=%s error=%s output=%s",
+        summary.checked_count,
+        summary.proven_equivalent_count,
+        summary.proven_non_equivalent_count,
+        summary.timeout_count,
+        summary.unsupported_count,
+        summary.error_count,
+        summary.output_path,
+    )
+    return summary
 
 
 def read_equivalence_records(path: Path) -> list[EquivalenceRecord]:
@@ -318,8 +357,18 @@ def _run_batch_with_runner(
     try:
         runner(command, cwd=cwd, timeout=batch_timeout)
     except subprocess.TimeoutExpired as exc:
+        LOGGER.warning(
+            "VeriEQL runner timed out timeout=%s error=%s",
+            batch_timeout,
+            exc,
+        )
         failure = ("timeout", "TMO", str(exc))
     except subprocess.CalledProcessError as exc:
+        LOGGER.warning(
+            "VeriEQL runner failed code=%s stderr=%s",
+            exc.returncode,
+            exc.stderr or exc.stdout or str(exc),
+        )
         failure = ("error", None, exc.stderr or exc.stdout or str(exc))
     return _checkpoint_and_finalize_records(
         output_path=output_path,
@@ -379,6 +428,11 @@ def _run_batch_with_checkpointing(
                     process.wait()
                     timed_out = True
                     return_code = None
+                    LOGGER.warning(
+                        "VeriEQL batch timeout reached batch_timeout=%s output_dir=%s",
+                        batch_timeout,
+                        output_path.parent,
+                    )
                     break
         stdout_text = stdout_path.read_text(encoding="utf-8")
         stderr_text = stderr_path.read_text(encoding="utf-8")
@@ -431,6 +485,7 @@ def _checkpoint_and_finalize_records(
         records=records,
         seen_ids=seen_ids,
     )
+    missing_filled = 0
     for mutation in mutations:
         if mutation.mutant_id in seen_ids:
             continue
@@ -452,6 +507,13 @@ def _checkpoint_and_finalize_records(
             )
         _record_result(records, record, output_path=artifact_path)
         seen_ids.add(record.mutant_id)
+        missing_filled += 1
+    LOGGER.info(
+        "Equivalence checkpoint finalized records=%s missing_filled=%s artifact=%s",
+        len(records),
+        missing_filled,
+        artifact_path,
+    )
     return records
 
 
@@ -511,6 +573,7 @@ def _checkpoint_available_rows(
 ) -> None:
     """Read available VeriEQL rows and append any not yet checkpointed."""
 
+    appended = 0
     rows_by_file = _read_raw_verieql_rows(output_path)
     mutations_by_id = {mutation.mutant_id: mutation for mutation in mutations}
     for mutant_id, row in rows_by_file.items():
@@ -540,6 +603,14 @@ def _checkpoint_available_rows(
         )
         _record_result(records, record, output_path=artifact_path)
         seen_ids.add(mutant_id)
+        appended += 1
+    if appended:
+        LOGGER.info(
+            "Equivalence checkpoint appended=%s artifact=%s source_dir=%s",
+            appended,
+            artifact_path,
+            output_path.parent,
+        )
 
 
 def _read_raw_verieql_rows(path: Path) -> dict[str, dict[str, Any]]:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import subprocess
 import tempfile
@@ -34,6 +35,9 @@ class SQLDrillerRunner(Protocol):
     ) -> subprocess.CompletedProcess[str]: ...
 
 
+LOGGER = logging.getLogger(__name__)
+
+
 def run_counterexample_generation(
     config: ExperimentConfig,
     *,
@@ -42,6 +46,17 @@ def run_counterexample_generation(
 ) -> CounterexampleSummary:
     """Generate counterexamples for surviving proven non-equivalent mutants."""
 
+    LOGGER.info(
+        "Counterexample stage start mutants=%s equivalence=%s execution=%s "
+        "output=%s resume=%s overwrite=%s sqldriller_timeout=%s",
+        artifacts.mutants,
+        artifacts.equivalence,
+        artifacts.execution,
+        artifacts.counterexamples,
+        config.resume,
+        config.overwrite,
+        config.timeouts.sqldriller_seconds,
+    )
     manifest_exists = artifacts.counterexamples.exists()
     output_dir_exists = artifacts.counterexamples_dir.exists()
     if manifest_exists:
@@ -127,6 +142,12 @@ def run_counterexample_generation(
     pending = [
         mutation for mutation in selected if mutation.mutant_id not in existing_ids
     ]
+    LOGGER.info(
+        "Counterexample selection selected=%s existing=%s pending=%s",
+        len(selected),
+        len(existing_records),
+        len(pending),
+    )
 
     new_records: list[CounterexampleRecord] = []
     active_runner = runner or _run_subprocess
@@ -146,13 +167,24 @@ def run_counterexample_generation(
         )
 
     records = existing_records + new_records
-    return summarize_counterexamples(
+    summary = summarize_counterexamples(
         records,
         output_path=artifacts.counterexamples,
         output_dir=artifacts.counterexamples_dir,
         resumed=resumed,
         skipped_stages=_skipped_stages(config),
     )
+    LOGGER.info(
+        "Counterexample stage complete selected=%s generated=%s "
+        "not_generated=%s timeout=%s error=%s output=%s",
+        summary.selected_count,
+        summary.generated_count,
+        summary.not_generated_count,
+        summary.timeout_count,
+        summary.error_count,
+        summary.output_path,
+    )
+    return summary
 
 
 def read_counterexample_records(path: Path) -> list[CounterexampleRecord]:
@@ -229,6 +261,12 @@ def _generate_counterexample(
 ) -> CounterexampleRecord:
     """Run the SQLDriller adapter for one selected mutant."""
 
+    LOGGER.debug(
+        "Generating counterexample mutant_id=%s db_id=%s rule=%s",
+        mutation.mutant_id,
+        mutation.db_id,
+        mutation.rule,
+    )
     with tempfile.TemporaryDirectory(
         prefix="sqldriller-",
         dir=artifacts.root,
@@ -263,12 +301,24 @@ def _generate_counterexample(
                 timeout=config.timeouts.sqldriller_seconds,
             )
         except subprocess.TimeoutExpired as exc:
+            LOGGER.warning(
+                "SQLDriller timeout mutant_id=%s timeout=%s error=%s",
+                mutation.mutant_id,
+                config.timeouts.sqldriller_seconds,
+                exc,
+            )
             return _error_record(
                 mutation,
                 outcome="timeout",
                 error=str(exc),
             )
         except subprocess.CalledProcessError as exc:
+            LOGGER.warning(
+                "SQLDriller failure mutant_id=%s code=%s error=%s",
+                mutation.mutant_id,
+                exc.returncode,
+                exc.stderr or exc.stdout or str(exc),
+            )
             return _error_record(
                 mutation,
                 outcome="error",

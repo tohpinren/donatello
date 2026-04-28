@@ -123,6 +123,29 @@ def test_cli_run_writes_mutant_output_and_skips_only_later_stages(
     assert "mutants.jsonl" in result.stdout
 
 
+def test_cli_run_log_contains_stage_debug_markers(tmp_path: Path) -> None:
+    data_root = write_bird_fixture(tmp_path)
+    output_dir = tmp_path / "outputs" / "bird-dev"
+    config_path = write_config(
+        tmp_path / "bird-dev.yaml",
+        data_root=data_root,
+        output_dir=output_dir,
+        mutate=True,
+    )
+
+    result = runner.invoke(app, ["run", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    run_log = output_dir / "run.log"
+    log_text = run_log.read_text(encoding="utf-8")
+    assert "Starting experiment name=test-run" in log_text
+    assert "Running stage=normalize" in log_text
+    assert "Normalization stage complete" in log_text
+    assert "Running stage=mutate" in log_text
+    assert "Mutation stage complete" in log_text
+    assert "Experiment completed successfully" in log_text
+
+
 def test_cli_run_resumes_existing_normalized_output(tmp_path: Path) -> None:
     data_root = write_bird_fixture(tmp_path)
     output_dir = tmp_path / "outputs" / "bird-dev"

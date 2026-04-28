@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import time
 from pathlib import Path
@@ -20,6 +21,7 @@ from sqlmt.models import (
 from sqlmt.mutation.generator import read_mutation_records
 
 _SAMPLE_LIMIT = 5
+LOGGER = logging.getLogger(__name__)
 
 
 def run_sqlite_execution(
@@ -29,6 +31,16 @@ def run_sqlite_execution(
 ) -> ExecutionSummary:
     """Run retained non-equivalent mutants against SQLite databases."""
 
+    LOGGER.info(
+        "Execution stage start mutants=%s equivalence=%s output=%s "
+        "resume=%s overwrite=%s sqlite_timeout=%s",
+        artifacts.mutants,
+        artifacts.equivalence,
+        artifacts.execution,
+        config.resume,
+        config.overwrite,
+        config.timeouts.sqlite_seconds,
+    )
     if artifacts.execution.exists():
         if config.resume:
             existing_records = read_execution_records(artifacts.execution)
@@ -75,6 +87,12 @@ def run_sqlite_execution(
     pending = [
         mutation for mutation in retained if mutation.mutant_id not in existing_ids
     ]
+    LOGGER.info(
+        "Execution selection retained=%s existing=%s pending=%s",
+        len(retained),
+        len(existing_records),
+        len(pending),
+    )
     _ensure_execution_artifact(artifacts.execution)
     new_records = execute_mutations(
         pending,
@@ -82,12 +100,24 @@ def run_sqlite_execution(
         output_path=artifacts.execution,
     )
     records = existing_records + new_records
-    return summarize_execution(
+    summary = summarize_execution(
         records,
         output_path=artifacts.execution,
         resumed=resumed,
         skipped_stages=_skipped_stages(config),
     )
+    LOGGER.info(
+        "Execution stage complete executed=%s killed=%s survived=%s "
+        "timeout=%s error=%s score=%s output=%s",
+        summary.executed_count,
+        summary.killed_count,
+        summary.survived_count,
+        summary.timeout_count,
+        summary.error_count,
+        summary.mutation_score,
+        summary.output_path,
+    )
+    return summary
 
 
 def execute_mutations(
@@ -100,6 +130,11 @@ def execute_mutations(
 
     records: list[ExecutionRecord] = []
     gold_cache: dict[tuple[str, str], list[tuple[Any, ...]] | Exception] = {}
+    LOGGER.info(
+        "Executing sqlite mutations pending=%s timeout_seconds=%s",
+        len(mutations),
+        timeout_seconds,
+    )
     for mutation in mutations:
         if mutation.mutant_sql is None:
             continue
@@ -114,11 +149,22 @@ def execute_mutations(
                     )
                 except Exception as exc:
                     gold_cache[cache_key] = exc
+                    LOGGER.warning(
+                        "Gold query failed mutant_id=%s db=%s error=%s",
+                        mutation.mutant_id,
+                        mutation.sqlite_path,
+                        exc,
+                    )
             cached_gold = gold_cache[cache_key]
             if isinstance(cached_gold, Exception):
                 raise cached_gold
             gold_rows = cached_gold
         except Exception as exc:
+            LOGGER.warning(
+                "Execution error phase=gold mutant_id=%s error=%s",
+                mutation.mutant_id,
+                exc,
+            )
             _record_result(
                 records,
                 _error_record(mutation, "gold", exc),
@@ -133,6 +179,11 @@ def execute_mutations(
                 timeout_seconds=timeout_seconds,
             )
         except Exception as exc:
+            LOGGER.warning(
+                "Execution error phase=mutant mutant_id=%s error=%s",
+                mutation.mutant_id,
+                exc,
+            )
             _record_result(
                 records,
                 _error_record(mutation, "mutant", exc),
@@ -141,6 +192,13 @@ def execute_mutations(
             continue
 
         outcome: ExecutionOutcome = "survived" if gold_rows == mutant_rows else "killed"
+        LOGGER.debug(
+            "Execution compared mutant_id=%s outcome=%s gold_rows=%s mutant_rows=%s",
+            mutation.mutant_id,
+            outcome,
+            len(gold_rows),
+            len(mutant_rows),
+        )
         _record_result(
             records,
             ExecutionRecord(

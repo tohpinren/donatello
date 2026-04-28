@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import shutil
 import sqlite3
 from pathlib import Path
@@ -30,6 +31,7 @@ app = typer.Typer(
 )
 config_app = typer.Typer(help="Inspect and validate experiment configs.")
 app.add_typer(config_app, name="config")
+LOGGER = logging.getLogger(__name__)
 
 
 def _version_callback(value: bool) -> None:
@@ -214,6 +216,15 @@ def run(
 
     artifacts = prepare_run(loaded)
     configure_logging(artifacts.run_log)
+    LOGGER.info(
+        "Starting experiment name=%s benchmark=%s mode=%s "
+        "output_dir=%s enabled_stages=%s",
+        loaded.experiment_name,
+        loaded.benchmark,
+        loaded.bird_mode,
+        artifacts.root,
+        ",".join(loaded.stages.enabled()),
+    )
 
     normalization_summary = None
     mutation_summary = None
@@ -223,33 +234,39 @@ def run(
 
     try:
         if loaded.stages.normalize:
+            LOGGER.info("Running stage=normalize")
             normalization_summary = run_normalization(
                 loaded,
                 config_path=config,
                 artifacts=artifacts,
             )
         if loaded.stages.mutate:
+            LOGGER.info("Running stage=mutate")
             mutation_summary = run_mutation_generation(
                 loaded,
                 config_path=config,
                 artifacts=artifacts,
             )
         if loaded.stages.equivalence:
+            LOGGER.info("Running stage=equivalence")
             equivalence_summary = run_equivalence_filtering(
                 loaded,
                 artifacts=artifacts,
             )
         if loaded.stages.execute:
+            LOGGER.info("Running stage=execute")
             execution_summary = run_sqlite_execution(
                 loaded,
                 artifacts=artifacts,
             )
         if loaded.stages.counterexamples:
+            LOGGER.info("Running stage=counterexamples")
             counterexample_summary = run_counterexample_generation(
                 loaded,
                 artifacts=artifacts,
             )
     except PipelineError as exc:
+        LOGGER.exception("Pipeline failed: %s", exc)
         typer.echo(f"Pipeline error: {exc}", err=True)
         raise typer.Exit(code=2) from exc
 
@@ -323,6 +340,8 @@ def run(
         )
         typer.echo(f"Wrote: {counterexample_summary.output_path}")
         typer.echo(f"Counterexample files: {counterexample_summary.output_dir}")
+
+    LOGGER.info("Experiment completed successfully name=%s", loaded.experiment_name)
 
     skipped_stages = (
         counterexample_summary.skipped_stages

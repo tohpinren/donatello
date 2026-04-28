@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -28,6 +29,8 @@ from sqlmt.mutation.generator import (
     summarize_mutations,
     write_mutation_records,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 
 class PipelineError(RuntimeError):
@@ -61,12 +64,20 @@ def prepare_run(config: ExperimentConfig) -> ExperimentArtifacts:
 
     artifacts = artifacts_for(config.output_dir)
     artifacts.ensure_base_dirs()
+    LOGGER.info("Prepared artifact root=%s", artifacts.root)
     return artifacts
 
 
 def preflight_run(config: ExperimentConfig) -> None:
     """Reject unsupported or no-op runs before creating output artifacts."""
 
+    LOGGER.info(
+        "Preflight start benchmark=%s mode=%s output_dir=%s stages=%s",
+        config.benchmark,
+        config.bird_mode,
+        config.output_dir,
+        ",".join(config.stages.enabled()),
+    )
     if config.benchmark != "bird":
         raise PipelineError(
             f"Normalization for benchmark '{config.benchmark}' is not implemented yet."
@@ -183,6 +194,13 @@ def run_mutation_generation(
 ) -> MutationSummary:
     """Execute or resume mutation generation from normalized examples."""
 
+    LOGGER.info(
+        "Mutation stage start normalized_examples=%s mutants=%s resume=%s overwrite=%s",
+        artifacts.normalized_examples,
+        artifacts.mutants,
+        config.resume,
+        config.overwrite,
+    )
     if not artifacts.normalized_examples.exists():
         raise PipelineError(
             "Mutation generation requires normalized_examples.jsonl, "
@@ -218,13 +236,20 @@ def run_mutation_generation(
         for stage in config.stages.enabled()
         if stage not in {"normalize", "mutate"}
     ]
-    return summarize_mutations(
+    summary = summarize_mutations(
         records,
         benchmark=config.benchmark,
         profile=config.mutation_profile,
         output_path=artifacts.mutants,
         skipped_stages=skipped_stages,
     )
+    LOGGER.info(
+        "Mutation stage complete generated=%s skipped=%s output=%s",
+        summary.generated_count,
+        summary.skipped_count,
+        summary.output_path,
+    )
+    return summary
 
 
 def run_normalization(
@@ -235,6 +260,13 @@ def run_normalization(
 ) -> NormalizationSummary:
     """Execute the implemented normalization stage for the configured benchmark."""
 
+    LOGGER.info(
+        "Normalization stage start benchmark=%s mode=%s data_root=%s output=%s",
+        config.benchmark,
+        config.bird_mode,
+        config.data_root,
+        artifacts.normalized_examples,
+    )
     try:
         examples = normalize_examples(config)
     except BenchmarkError as exc:
@@ -266,7 +298,7 @@ def run_normalization(
     skipped_stages = [
         stage for stage in config.stages.enabled() if stage != "normalize"
     ]
-    return NormalizationSummary(
+    summary = NormalizationSummary(
         benchmark=config.benchmark,
         mode=mode,
         example_count=len(examples),
@@ -274,6 +306,13 @@ def run_normalization(
         output_path=str(artifacts.normalized_examples),
         skipped_stages=skipped_stages,
     )
+    LOGGER.info(
+        "Normalization stage complete examples=%s databases=%s output=%s",
+        summary.example_count,
+        summary.database_count,
+        summary.output_path,
+    )
+    return summary
 
 
 def _write_config_snapshot(source: Path, target: Path) -> None:
