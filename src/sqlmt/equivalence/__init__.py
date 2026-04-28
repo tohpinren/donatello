@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import subprocess
 import tempfile
+import time
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, TextIO
 
 from sqlmt.artifacts import ExperimentArtifacts
 from sqlmt.config import ExperimentConfig
@@ -91,19 +92,22 @@ def run_equivalence_filtering(
     """Run VeriEQL over generated mutants and persist explicit outcomes."""
 
     if artifacts.equivalence.exists():
+        if config.resume:
+            existing_records = read_equivalence_records(artifacts.equivalence)
+            resumed = True
+        if not config.overwrite:
+            if not config.resume:
+                raise ValueError(
+                    "Equivalence outputs already exist: equivalence.jsonl. "
+                    "Set resume: true to reuse them or overwrite: true to replace them."
+                )
         if config.overwrite:
-            pass
-        elif config.resume:
-            return summarize_equivalence(
-                read_equivalence_records(artifacts.equivalence),
-                output_path=artifacts.equivalence,
-                resumed=True,
-                skipped_stages=_skipped_stages(config),
-            )
-        raise ValueError(
-            "Equivalence outputs already exist: equivalence.jsonl. "
-            "Set resume: true to reuse them or overwrite: true to replace them."
-        )
+            artifacts.equivalence.unlink()
+            existing_records = []
+            resumed = False
+    else:
+        existing_records = []
+        resumed = False
 
     if config.tools.verieql_path is None:
         raise ValueError("tools.verieql_path is required when equivalence is enabled.")
@@ -111,24 +115,51 @@ def run_equivalence_filtering(
         raise ValueError(
             "tools.verieql_python is required when equivalence is enabled."
         )
-    if not artifacts.normalized_examples.exists():
-        raise ValueError(
+    for artifact_path, missing_message in (
+        (
+            artifacts.normalized_examples,
             "Equivalence filtering requires normalized_examples.jsonl, "
-            "but it does not exist."
+            "but it does not exist.",
+        ),
+        (
+            artifacts.mutants,
+            "Equivalence filtering requires mutants.jsonl, but it does not exist.",
+        ),
+    ):
+        early = _missing_dependency_outcome(
+            artifact_path=artifact_path,
+            resumed=resumed,
+            existing_records=existing_records,
+            output_path=artifacts.equivalence,
+            config=config,
+            missing_message=missing_message,
         )
-    if not artifacts.mutants.exists():
-        raise ValueError(
-            "Equivalence filtering requires mutants.jsonl, but it does not exist."
-        )
+        if early is not None:
+            return early
 
     examples = read_normalized_examples(artifacts.normalized_examples)
     mutations = read_mutation_records(artifacts.mutants)
-    input_rows = build_verieql_input_rows(mutations, examples)
     generated_mutations = [
         mutation
         for mutation in mutations
         if mutation.status == "generated" and mutation.mutant_sql is not None
     ]
+    existing_ids = {record.mutant_id for record in existing_records}
+    pending_mutations = [
+        mutation
+        for mutation in generated_mutations
+        if mutation.mutant_id not in existing_ids
+    ]
+    if not pending_mutations:
+        return summarize_equivalence(
+            existing_records,
+            output_path=artifacts.equivalence,
+            resumed=resumed,
+            skipped_stages=_skipped_stages(config),
+        )
+
+    input_rows = build_verieql_input_rows(pending_mutations, examples)
+    _ensure_equivalence_artifact(artifacts.equivalence)
 
     with tempfile.TemporaryDirectory(
         prefix="verieql-", dir=artifacts.root
@@ -150,43 +181,36 @@ def run_equivalence_filtering(
             "-o",
             str(output_path),
         ]
-        active_runner = runner or _run_subprocess
-        try:
-            active_runner(
-                command,
+        batch_timeout = _subprocess_timeout(
+            config.timeouts.verieql_seconds,
+            len(pending_mutations),
+        )
+        if runner is not None:
+            records = _run_batch_with_runner(
+                runner=runner,
+                command=command,
                 cwd=config.tools.verieql_path,
-                timeout=_subprocess_timeout(
-                    config.timeouts.verieql_seconds,
-                    len(generated_mutations),
-                ),
-            )
-        except subprocess.TimeoutExpired as exc:
-            records = _subprocess_failure_records(
-                generated_mutations,
-                outcome="timeout",
-                raw_state="TMO",
+                batch_timeout=batch_timeout,
+                output_path=output_path,
+                mutations=pending_mutations,
                 timeout_seconds=config.timeouts.verieql_seconds,
-                error=str(exc),
-            )
-        except subprocess.CalledProcessError as exc:
-            records = _subprocess_failure_records(
-                generated_mutations,
-                outcome="error",
-                raw_state=None,
-                timeout_seconds=config.timeouts.verieql_seconds,
-                error=exc.stderr or exc.stdout or str(exc),
+                artifact_path=artifacts.equivalence,
             )
         else:
-            records = _records_from_verieql_output(
-                output_path,
-                generated_mutations,
+            records = _run_batch_with_checkpointing(
+                command=command,
+                cwd=config.tools.verieql_path,
+                batch_timeout=batch_timeout,
+                output_path=output_path,
+                mutations=pending_mutations,
                 timeout_seconds=config.timeouts.verieql_seconds,
+                artifact_path=artifacts.equivalence,
             )
 
-    write_equivalence_records(artifacts.equivalence, records)
     return summarize_equivalence(
-        records,
+        existing_records + records,
         output_path=artifacts.equivalence,
+        resumed=resumed,
         skipped_stages=_skipped_stages(config),
     )
 
@@ -220,8 +244,21 @@ def write_equivalence_records(
 
     with path.open("w", encoding="utf-8") as file:
         for record in records:
-            file.write(json.dumps(record.to_dict(), ensure_ascii=True))
-            file.write("\n")
+            _write_equivalence_jsonl_line(file, record=record)
+
+
+def append_equivalence_record(path: Path, record: EquivalenceRecord) -> None:
+    """Append one equivalence record to a JSONL artifact."""
+
+    with path.open("a", encoding="utf-8") as file:
+        _write_equivalence_jsonl_line(file, record=record)
+
+
+def _write_equivalence_jsonl_line(file: TextIO, *, record: EquivalenceRecord) -> None:
+    """Serialize one equivalence record as a single JSONL line."""
+
+    file.write(json.dumps(record.to_dict(), ensure_ascii=True))
+    file.write("\n")
 
 
 def summarize_equivalence(
@@ -262,6 +299,160 @@ def _run_subprocess(
         capture_output=True,
         text=True,
     )
+
+
+def _run_batch_with_runner(
+    *,
+    runner: VeriEQLRunner,
+    command: list[str],
+    cwd: Path,
+    batch_timeout: int,
+    output_path: Path,
+    mutations: list[MutationRecord],
+    timeout_seconds: int,
+    artifact_path: Path,
+) -> list[EquivalenceRecord]:
+    """Run a synchronous test runner and salvage any written output rows."""
+
+    failure: tuple[EquivalenceOutcome, str | None, str] | None = None
+    try:
+        runner(command, cwd=cwd, timeout=batch_timeout)
+    except subprocess.TimeoutExpired as exc:
+        failure = ("timeout", "TMO", str(exc))
+    except subprocess.CalledProcessError as exc:
+        failure = ("error", None, exc.stderr or exc.stdout or str(exc))
+    return _checkpoint_and_finalize_records(
+        output_path=output_path,
+        mutations=mutations,
+        timeout_seconds=timeout_seconds,
+        artifact_path=artifact_path,
+        failure=failure,
+    )
+
+
+def _run_batch_with_checkpointing(
+    *,
+    command: list[str],
+    cwd: Path,
+    batch_timeout: int,
+    output_path: Path,
+    mutations: list[MutationRecord],
+    timeout_seconds: int,
+    artifact_path: Path,
+) -> list[EquivalenceRecord]:
+    """Run VeriEQL and checkpoint shard outputs while it is still executing."""
+
+    stdout_path = output_path.parent / "stdout.log"
+    stderr_path = output_path.parent / "stderr.log"
+    start = time.monotonic()
+    poll_seconds = 1.0
+    records: list[EquivalenceRecord] = []
+    seen_ids = {
+        record.mutant_id for record in read_equivalence_records(artifact_path)
+    }
+    with stdout_path.open("w", encoding="utf-8") as stdout_file, stderr_path.open(
+        "w", encoding="utf-8"
+    ) as stderr_file:
+        process = subprocess.Popen(
+            command,
+            cwd=cwd,
+            stdout=stdout_file,
+            stderr=stderr_file,
+            text=True,
+        )
+        timed_out = False
+        while True:
+            _checkpoint_available_rows(
+                output_path=output_path,
+                mutations=mutations,
+                timeout_seconds=timeout_seconds,
+                artifact_path=artifact_path,
+                records=records,
+                seen_ids=seen_ids,
+            )
+            try:
+                return_code = process.wait(timeout=poll_seconds)
+                break
+            except subprocess.TimeoutExpired:
+                if time.monotonic() - start >= batch_timeout:
+                    process.kill()
+                    process.wait()
+                    timed_out = True
+                    return_code = None
+                    break
+        stdout_text = stdout_path.read_text(encoding="utf-8")
+        stderr_text = stderr_path.read_text(encoding="utf-8")
+    if timed_out:
+        failure = (
+            "timeout",
+            "TMO",
+            f"VeriEQL batch timed out after {batch_timeout} seconds.",
+        )
+    elif return_code != 0:
+        failure = (
+            "error",
+            None,
+            stderr_text or stdout_text or f"VeriEQL exited with code {return_code}.",
+        )
+    else:
+        failure = None
+    return _checkpoint_and_finalize_records(
+        output_path=output_path,
+        mutations=mutations,
+        timeout_seconds=timeout_seconds,
+        artifact_path=artifact_path,
+        failure=failure,
+        records=records,
+        seen_ids=seen_ids,
+    )
+
+
+def _checkpoint_and_finalize_records(
+    *,
+    output_path: Path,
+    mutations: list[MutationRecord],
+    timeout_seconds: int,
+    artifact_path: Path,
+    failure: tuple[EquivalenceOutcome, str | None, str] | None,
+    records: list[EquivalenceRecord] | None = None,
+    seen_ids: set[str] | None = None,
+) -> list[EquivalenceRecord]:
+    """Append all discovered rows, then synthesize explicit outcomes for the rest."""
+
+    records = records or []
+    seen_ids = seen_ids or {
+        record.mutant_id for record in read_equivalence_records(artifact_path)
+    }
+    _checkpoint_available_rows(
+        output_path=output_path,
+        mutations=mutations,
+        timeout_seconds=timeout_seconds,
+        artifact_path=artifact_path,
+        records=records,
+        seen_ids=seen_ids,
+    )
+    for mutation in mutations:
+        if mutation.mutant_id in seen_ids:
+            continue
+        if failure is None:
+            record = _error_record(
+                mutation,
+                timeout_seconds=timeout_seconds,
+                error="VeriEQL did not write a result row for this mutant.",
+            )
+        else:
+            outcome, raw_state, error = failure
+            record = EquivalenceRecord(
+                mutant_id=mutation.mutant_id,
+                example_id=mutation.example_id,
+                outcome=outcome,
+                raw_state=raw_state,
+                timeout_seconds=timeout_seconds,
+                error=error,
+            )
+        _record_result(records, record, output_path=artifact_path)
+        seen_ids.add(record.mutant_id)
+    return records
 
 
 def _records_from_verieql_output(
@@ -309,27 +500,78 @@ def _records_from_verieql_output(
     return records
 
 
+def _checkpoint_available_rows(
+    *,
+    output_path: Path,
+    mutations: list[MutationRecord],
+    timeout_seconds: int,
+    artifact_path: Path,
+    records: list[EquivalenceRecord],
+    seen_ids: set[str],
+) -> None:
+    """Read available VeriEQL rows and append any not yet checkpointed."""
+
+    rows_by_file = _read_raw_verieql_rows(output_path)
+    mutations_by_id = {mutation.mutant_id: mutation for mutation in mutations}
+    for mutant_id, row in rows_by_file.items():
+        if mutant_id in seen_ids:
+            continue
+        mutation = mutations_by_id.get(mutant_id)
+        if mutation is None:
+            continue
+        states = row.get("states", [])
+        raw_state = _last_state(states)
+        record = EquivalenceRecord(
+            mutant_id=mutation.mutant_id,
+            example_id=mutation.example_id,
+            outcome=_outcome_for_state(raw_state),
+            raw_state=raw_state,
+            timeout_seconds=timeout_seconds,
+            verieql_index=(
+                int(row["index"]) if row.get("index") is not None else None
+            ),
+            times=list(row.get("times", [])),
+            counterexample_sql=(
+                str(row["counterexample"])
+                if row.get("counterexample") is not None
+                else None
+            ),
+            error=str(row["err"]) if row.get("err") is not None else None,
+        )
+        _record_result(records, record, output_path=artifact_path)
+        seen_ids.add(mutant_id)
+
+
 def _read_raw_verieql_rows(path: Path) -> dict[str, dict[str, Any]]:
     """Read raw VeriEQL output keyed by the input ``file`` field."""
 
-    if not path.exists():
-        return {}
     rows: dict[str, dict[str, Any]] = {}
-    with path.open("r", encoding="utf-8") as file:
-        for line_number, line in enumerate(file, start=1):
-            if not line.strip():
-                continue
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                rows[f"__malformed_{line_number}"] = {
-                    "file": f"__malformed_{line_number}",
-                    "states": ["OTE"],
-                    "err": f"Malformed VeriEQL output at line {line_number}.",
-                }
-                continue
-            if isinstance(row, dict) and isinstance(row.get("file"), str):
-                rows[str(row["file"])] = row
+    output_paths = sorted(
+        {candidate for candidate in path.parent.glob(f"{path.name}*")}
+    )
+    if path.exists():
+        output_paths.append(path)
+    for candidate in output_paths:
+        if not candidate.exists() or not candidate.is_file():
+            continue
+        with candidate.open("r", encoding="utf-8") as file:
+            for line_number, line in enumerate(file, start=1):
+                if not line.strip():
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    rows[f"__malformed_{candidate.name}_{line_number}"] = {
+                        "file": f"__malformed_{candidate.name}_{line_number}",
+                        "states": ["OTE"],
+                        "err": (
+                            f"Malformed VeriEQL output in {candidate.name} at line "
+                            f"{line_number}."
+                        ),
+                    }
+                    continue
+                if isinstance(row, dict) and isinstance(row.get("file"), str):
+                    rows[str(row["file"])] = row
     return rows
 
 
@@ -494,6 +736,50 @@ def _subprocess_timeout(pair_timeout_seconds: int, pair_count: int) -> int:
     """Return a conservative timeout for one VeriEQL batch subprocess."""
 
     return pair_timeout_seconds * max(1, pair_count) + 60
+
+
+def _ensure_equivalence_artifact(path: Path) -> None:
+    """Create an empty checkpoint artifact when it does not exist yet."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.write_text("", encoding="utf-8")
+
+
+def _record_result(
+    records: list[EquivalenceRecord],
+    record: EquivalenceRecord,
+    *,
+    output_path: Path | None,
+) -> None:
+    """Keep the in-memory summary and on-disk checkpoint in sync."""
+
+    records.append(record)
+    if output_path is not None:
+        append_equivalence_record(output_path, record)
+
+
+def _missing_dependency_outcome(
+    *,
+    artifact_path: Path,
+    resumed: bool,
+    existing_records: list[EquivalenceRecord],
+    output_path: Path,
+    config: ExperimentConfig,
+    missing_message: str,
+) -> EquivalenceSummary | None:
+    """If a required artifact is absent, return a resume summary or raise."""
+
+    if artifact_path.exists():
+        return None
+    if resumed:
+        return summarize_equivalence(
+            existing_records,
+            output_path=output_path,
+            resumed=True,
+            skipped_stages=_skipped_stages(config),
+        )
+    raise ValueError(missing_message)
 
 
 def _skipped_stages(config: ExperimentConfig) -> list[str]:
