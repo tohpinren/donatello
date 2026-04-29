@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -270,6 +272,173 @@ def test_sqlite_execution_resumes_partial_artifact(
     assert [row.outcome for row in rows] == ["survived", "killed"]
 
 
+def test_sqlite_execution_parallelizes_and_preserves_record_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "company.sqlite"
+    artifacts = artifacts_for(tmp_path / "outputs")
+    artifacts.ensure_base_dirs()
+    write_mutation_records(
+        artifacts.mutants,
+        [
+            _mutation("first", db_path=db_path, mutant_sql="SELECT first"),
+            _mutation("second", db_path=db_path, mutant_sql="SELECT second"),
+            _mutation("third", db_path=db_path, mutant_sql="SELECT third"),
+        ],
+    )
+    write_equivalence_records(
+        artifacts.equivalence,
+        [
+            _equivalence("first", "proven_non_equivalent"),
+            _equivalence("second", "proven_non_equivalent"),
+            _equivalence("third", "proven_non_equivalent"),
+        ],
+    )
+
+    gold_calls = 0
+    active_mutants = 0
+    max_active_mutants = 0
+    lock = threading.Lock()
+
+    def fake_execute_sql(
+        path: Path,
+        sql: str,
+        *,
+        timeout_seconds: int,
+    ) -> list[tuple[Any, ...]]:
+        nonlocal gold_calls, active_mutants, max_active_mutants
+        if sql == "SELECT name FROM employees ORDER BY id":
+            with lock:
+                gold_calls += 1
+            time.sleep(0.01)
+            return [("Ada",), ("Grace",)]
+
+        durations = {
+            "SELECT first": 0.05,
+            "SELECT second": 0.01,
+            "SELECT third": 0.0,
+        }
+        with lock:
+            active_mutants += 1
+            max_active_mutants = max(max_active_mutants, active_mutants)
+        time.sleep(durations[sql])
+        with lock:
+            active_mutants -= 1
+        return {
+            "SELECT first": [("Ada",)],
+            "SELECT second": [("Grace",)],
+            "SELECT third": [("Ada",), ("Grace",)],
+        }[sql]
+
+    monkeypatch.setattr(execution, "_execute_sql", fake_execute_sql)
+
+    summary = run_sqlite_execution(
+        _config(tmp_path, workers=2),
+        artifacts=artifacts,
+    )
+
+    assert summary.executed_count == 3
+    assert summary.killed_count == 2
+    assert summary.survived_count == 1
+    assert gold_calls == 1
+    assert max_active_mutants == 2
+    rows = read_execution_records(artifacts.execution)
+    assert [row.mutant_id for row in rows] == ["first", "second", "third"]
+    assert [row.outcome for row in rows] == ["killed", "killed", "survived"]
+
+
+def test_sqlite_execution_workers_one_preserves_serial_execution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "company.sqlite"
+    artifacts = artifacts_for(tmp_path / "outputs")
+    artifacts.ensure_base_dirs()
+    write_mutation_records(
+        artifacts.mutants,
+        [
+            _mutation("first", db_path=db_path, mutant_sql="SELECT first"),
+            _mutation("second", db_path=db_path, mutant_sql="SELECT second"),
+        ],
+    )
+    write_equivalence_records(
+        artifacts.equivalence,
+        [
+            _equivalence("first", "proven_non_equivalent"),
+            _equivalence("second", "proven_non_equivalent"),
+        ],
+    )
+
+    active_mutants = 0
+    max_active_mutants = 0
+    lock = threading.Lock()
+
+    def fake_execute_sql(
+        path: Path,
+        sql: str,
+        *,
+        timeout_seconds: int,
+    ) -> list[tuple[Any, ...]]:
+        nonlocal active_mutants, max_active_mutants
+        if sql == "SELECT name FROM employees ORDER BY id":
+            return [("Ada",), ("Grace",)]
+        with lock:
+            active_mutants += 1
+            max_active_mutants = max(max_active_mutants, active_mutants)
+        time.sleep(0.01)
+        with lock:
+            active_mutants -= 1
+        return [("Ada",)]
+
+    monkeypatch.setattr(execution, "_execute_sql", fake_execute_sql)
+
+    summary = run_sqlite_execution(
+        _config(tmp_path, workers=1),
+        artifacts=artifacts,
+    )
+
+    assert summary.executed_count == 2
+    assert max_active_mutants == 1
+
+
+def test_sqlite_execution_shared_gold_baseexception_propagates_to_waiters(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "company.sqlite"
+    mutation = _mutation("shared", db_path=db_path)
+    cache = execution._GoldQueryCache(timeout_seconds=1)
+    errors: list[type[BaseException]] = []
+
+    def fake_execute_sql(
+        path: Path,
+        sql: str,
+        *,
+        timeout_seconds: int,
+    ) -> list[tuple[Any, ...]]:
+        time.sleep(0.02)
+        raise KeyboardInterrupt
+
+    def run_get() -> None:
+        try:
+            cache.get(mutation)
+        except BaseException as exc:  # noqa: B036
+            errors.append(type(exc))
+
+    monkeypatch.setattr(execution, "_execute_sql", fake_execute_sql)
+
+    owner = threading.Thread(target=run_get)
+    waiter = threading.Thread(target=run_get)
+    owner.start()
+    time.sleep(0.005)
+    waiter.start()
+    owner.join()
+    waiter.join()
+
+    assert errors == [KeyboardInterrupt, KeyboardInterrupt]
+
+
 def test_sqlite_execution_does_not_rewrite_checkpointed_artifact(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -400,6 +569,7 @@ def _config(
     resume: bool = True,
     overwrite: bool = False,
     sqlite_seconds: int = 120,
+    workers: int = 1,
 ) -> ExperimentConfig:
     return ExperimentConfig(
         experiment_name="test",
@@ -407,6 +577,7 @@ def _config(
         bird_mode="dev",
         data_root=tmp_path / "bird",
         output_dir=tmp_path / "outputs",
+        workers=workers,
         resume=resume,
         overwrite=overwrite,
         timeouts=TimeoutConfig(sqlite_seconds=sqlite_seconds),

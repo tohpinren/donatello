@@ -65,8 +65,13 @@ def test_cli_run_writes_counterexample_output(
         timeout: int,
     ) -> subprocess.CompletedProcess[str]:
         result_path = Path(command[command.index("--result-json") + 1])
+        request_path = Path(command[command.index("--request-json") + 1])
+        request = json.loads(request_path.read_text(encoding="utf-8"))
+        output_dir = Path(str(request["output_dir"]))
+        counterexample_path = output_dir / "ce.sqlite"
+        counterexample_path.write_text("sqlite", encoding="utf-8")
         result_path.write_text(
-            json.dumps({"raw_tag": 0, "counterexample_path": str(cwd / "ce.sqlite")}),
+            json.dumps({"raw_tag": 0, "counterexample_path": str(counterexample_path)}),
             encoding="utf-8",
         )
         return subprocess.CompletedProcess(command, 0, "", "")
