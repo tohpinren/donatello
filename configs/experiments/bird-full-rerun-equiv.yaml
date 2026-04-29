@@ -1,0 +1,29 @@
+experiment_name: bird-full-rerun-equiv
+benchmark: bird
+bird_mode: full
+data_root: ${BIRD_ROOT}
+output_dir: outputs/bird-full
+mutation_profile: canonical
+workers: 8
+resume: true
+overwrite: false
+
+stages:
+  normalize: false
+  mutate: false
+  equivalence: true
+  execute: true
+  counterexamples: true
+  augment: true
+  report: true
+
+timeouts:
+  verieql_seconds: 120
+  sqlite_seconds: 120
+  sqldriller_seconds: 300
+
+tools:
+  verieql_path: ${VERIEQL_ROOT}
+  verieql_python: ${VERIEQL_PYTHON}
+  sqldriller_path: ${SQLDRILLER_ROOT}
+  sqldriller_python: ${SQLDRILLER_PYTHON}

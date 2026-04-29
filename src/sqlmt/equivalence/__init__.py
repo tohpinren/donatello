@@ -179,12 +179,13 @@ def run_equivalence_filtering(
     input_rows = build_verieql_input_rows(pending_mutations, examples)
     _ensure_equivalence_artifact(artifacts.equivalence)
 
+    artifact_root = artifacts.root.resolve(strict=False)
     with tempfile.TemporaryDirectory(
-        prefix="verieql-", dir=artifacts.root
+        prefix="verieql-", dir=str(artifact_root)
     ) as temp_dir_name:
-        temp_dir = Path(temp_dir_name)
-        input_path = temp_dir / "input.jsonlines"
-        output_path = temp_dir / "output.out"
+        temp_dir = Path(temp_dir_name).resolve(strict=False)
+        input_path = (temp_dir / "input.jsonlines").resolve(strict=False)
+        output_path = (temp_dir / "output.out").resolve(strict=False)
         _write_jsonl(input_path, input_rows)
         command = [
             str(config.tools.verieql_python),

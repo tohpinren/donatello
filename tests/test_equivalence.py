@@ -135,6 +135,80 @@ def test_run_equivalence_filtering_maps_verieql_states_and_writes_artifact(
     assert rows[5]["error"] == "syntax"
 
 
+def test_equivalence_verieql_paths_absolute_when_output_dir_relative_to_cwd(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """VeriEQL runs with cwd=/path/VeriEQL; -f/-o must be absolute if output_dir is relative."""
+
+    monkeypatch.chdir(tmp_path)
+    artifacts = artifacts_for(Path("outputs"))
+    artifacts.ensure_base_dirs()
+    example = make_normalized_example(
+        "SELECT name FROM employees WHERE salary >= 100",
+    )
+    write_normalized_examples(artifacts.normalized_examples, [example])
+    write_mutation_records(
+        artifacts.mutants,
+        [
+            _mutation(
+                mutant_id="equ",
+                gold_sql=example.gold_sql,
+                mutant_sql="SELECT DISTINCT name FROM employees WHERE salary >= 100",
+            ),
+            _mutation(
+                mutant_id="neq",
+                gold_sql=example.gold_sql,
+                mutant_sql="SELECT name FROM employees WHERE salary > 100",
+            ),
+            _mutation(
+                mutant_id="timeout",
+                gold_sql=example.gold_sql,
+                mutant_sql="SELECT name FROM employees WHERE salary < 100",
+            ),
+            _mutation(
+                mutant_id="unsupported",
+                gold_sql=example.gold_sql,
+                mutant_sql="SELECT name FROM employees WHERE salary <> 100",
+            ),
+            _mutation(
+                mutant_id="not_implemented",
+                gold_sql=example.gold_sql,
+                mutant_sql="SELECT name FROM employees WHERE name LIKE 'A%'",
+            ),
+            _mutation(
+                mutant_id="error",
+                gold_sql=example.gold_sql,
+                mutant_sql="SELECT name FROM employees WHERE salary = 100",
+            ),
+            _mutation(mutant_id="skipped", status="skipped", mutant_sql=None),
+        ],
+    )
+    config = ExperimentConfig(
+        experiment_name="test",
+        benchmark="bird",
+        bird_mode="dev",
+        data_root=tmp_path / "bird",
+        output_dir=Path("outputs"),
+        workers=2,
+        stages=StageConfig(equivalence=True),
+        timeouts=TimeoutConfig(verieql_seconds=125),
+        tools=ToolConfig(
+            verieql_path=Path("/tmp/VeriEQL"),
+            verieql_python=Path("/tmp/verieql/bin/python"),
+        ),
+    )
+
+    summary = run_equivalence_filtering(
+        config,
+        artifacts=artifacts,
+        runner=_fake_verieql_runner,
+    )
+
+    assert summary.checked_count == 6
+    assert summary.proven_equivalent_count == 1
+
+
 def test_run_equivalence_filtering_resumes_existing_artifact(
     tmp_path: Path,
 ) -> None:
@@ -303,6 +377,8 @@ def _fake_verieql_runner(
     ]
     input_path = Path(command[command.index("-f") + 1])
     output_path = Path(command[command.index("-o") + 1])
+    assert input_path.is_absolute()
+    assert output_path.is_absolute()
     input_rows = read_jsonl(input_path)
     assert [row["file"] for row in input_rows] == [
         "equ",
@@ -358,6 +434,8 @@ def _resume_missing_runner(
 ) -> subprocess.CompletedProcess[str]:
     input_path = Path(command[command.index("-f") + 1])
     output_path = Path(command[command.index("-o") + 1])
+    assert input_path.is_absolute()
+    assert output_path.is_absolute()
     rows = read_jsonl(input_path)
     assert [row["file"] for row in rows] == ["pending"]
     output_path.write_text(
@@ -385,6 +463,8 @@ def _timeout_after_partial_output_runner(
 ) -> subprocess.CompletedProcess[str]:
     input_path = Path(command[command.index("-f") + 1])
     output_path = Path(command[command.index("-o") + 1])
+    assert input_path.is_absolute()
+    assert output_path.is_absolute()
     rows = read_jsonl(input_path)
     assert [row["file"] for row in rows] == ["done", "pending"]
     shard_path = output_path.parent / f"{output_path.name}0"
