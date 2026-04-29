@@ -217,6 +217,8 @@ Main fields:
 - `data_root`: benchmark root path
 - `output_dir`: artifact directory for the run
 - `mutation_profile`: currently `canonical`
+- `workers`: concurrency used by VeriEQL, SQLite execution, and SQLDriller
+  counterexample generation
 - `resume` / `overwrite`: artifact reuse behavior
 - `stages`: enable `normalize`, `mutate`, `equivalence`, `execute`, and
   `counterexamples` today
@@ -302,6 +304,12 @@ killed / (killed + survived)
 ```
 
 Execution timeouts and errors are reported separately and excluded from the score.
+
+`workers` currently applies to:
+
+- VeriEQL batch checking
+- SQLite execution for retained mutants
+- SQLDriller counterexample generation for retained survivors
 
 ## Mutation Profile
 

@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -19,6 +21,7 @@ from sqlmt.models import (
     MutationRecord,
 )
 from sqlmt.mutation.generator import read_mutation_records
+from sqlmt.parallel import ordered_parallel_map
 
 _SAMPLE_LIMIT = 5
 LOGGER = logging.getLogger(__name__)
@@ -33,13 +36,14 @@ def run_sqlite_execution(
 
     LOGGER.info(
         "Execution stage start mutants=%s equivalence=%s output=%s "
-        "resume=%s overwrite=%s sqlite_timeout=%s",
+        "resume=%s overwrite=%s sqlite_timeout=%s workers=%s",
         artifacts.mutants,
         artifacts.equivalence,
         artifacts.execution,
         config.resume,
         config.overwrite,
         config.timeouts.sqlite_seconds,
+        config.workers,
     )
     if artifacts.execution.exists():
         if config.resume:
@@ -97,6 +101,7 @@ def run_sqlite_execution(
     new_records = execute_mutations(
         pending,
         timeout_seconds=config.timeouts.sqlite_seconds,
+        workers=config.workers,
         output_path=artifacts.execution,
     )
     records = existing_records + new_records
@@ -124,100 +129,141 @@ def execute_mutations(
     mutations: list[MutationRecord],
     *,
     timeout_seconds: int = 120,
+    workers: int = 1,
     output_path: Path | None = None,
 ) -> list[ExecutionRecord]:
     """Execute retained mutants and compare them with cached gold SQL results."""
 
     records: list[ExecutionRecord] = []
-    gold_cache: dict[tuple[str, str], list[tuple[Any, ...]] | Exception] = {}
+    gold_cache = _GoldQueryCache(timeout_seconds=timeout_seconds)
     LOGGER.info(
-        "Executing sqlite mutations pending=%s timeout_seconds=%s",
+        "Executing sqlite mutations pending=%s timeout_seconds=%s workers=%s",
         len(mutations),
         timeout_seconds,
+        workers,
     )
-    for mutation in mutations:
-        if mutation.mutant_sql is None:
-            continue
-        cache_key = (mutation.sqlite_path, mutation.gold_sql)
-        try:
-            if cache_key not in gold_cache:
-                try:
-                    gold_cache[cache_key] = _execute_sql(
-                        Path(mutation.sqlite_path),
-                        mutation.gold_sql,
-                        timeout_seconds=timeout_seconds,
-                    )
-                except Exception as exc:
-                    gold_cache[cache_key] = exc
-                    LOGGER.warning(
-                        "Gold query failed mutant_id=%s db=%s error=%s",
-                        mutation.mutant_id,
-                        mutation.sqlite_path,
-                        exc,
-                    )
-            cached_gold = gold_cache[cache_key]
-            if isinstance(cached_gold, Exception):
-                raise cached_gold
-            gold_rows = cached_gold
-        except Exception as exc:
-            LOGGER.warning(
-                "Execution error phase=gold mutant_id=%s error=%s",
-                mutation.mutant_id,
-                exc,
-            )
-            _record_result(
-                records,
-                _error_record(mutation, "gold", exc),
-                output_path=output_path,
-            )
-            continue
-
-        try:
-            mutant_rows = _execute_sql(
-                Path(mutation.sqlite_path),
-                mutation.mutant_sql,
-                timeout_seconds=timeout_seconds,
-            )
-        except Exception as exc:
-            LOGGER.warning(
-                "Execution error phase=mutant mutant_id=%s error=%s",
-                mutation.mutant_id,
-                exc,
-            )
-            _record_result(
-                records,
-                _error_record(mutation, "mutant", exc),
-                output_path=output_path,
-            )
-            continue
-
-        outcome: ExecutionOutcome = "survived" if gold_rows == mutant_rows else "killed"
-        LOGGER.debug(
-            "Execution compared mutant_id=%s outcome=%s gold_rows=%s mutant_rows=%s",
-            mutation.mutant_id,
-            outcome,
-            len(gold_rows),
-            len(mutant_rows),
-        )
-        _record_result(
-            records,
-            ExecutionRecord(
-                mutant_id=mutation.mutant_id,
-                example_id=mutation.example_id,
-                outcome=outcome,
-                gold_sql=mutation.gold_sql,
-                mutant_sql=mutation.mutant_sql,
-                sqlite_path=mutation.sqlite_path,
-                rule=mutation.rule,
-                profile=mutation.profile,
-                gold_row_count=len(gold_rows),
-                mutant_row_count=len(mutant_rows),
-                gold_sample=_sample_rows(gold_rows),
-                mutant_sample=_sample_rows(mutant_rows),
-            ),
-            output_path=output_path,
-        )
+    for record in ordered_parallel_map(
+        mutations,
+        workers=workers,
+        fn=lambda mutation: _execute_mutation(
+            mutation,
+            timeout_seconds=timeout_seconds,
+            gold_cache=gold_cache,
+        ),
+    ):
+        _record_result(records, record, output_path=output_path)
     return records
+
+
+@dataclass
+class _GoldCacheEntry:
+    """One shared gold-query result used across worker threads."""
+
+    ready: threading.Event
+    value: list[tuple[Any, ...]] | None = None
+    error: Exception | None = None
+
+
+class _GoldQueryCache:
+    """Memoize gold query execution once per database/query pair."""
+
+    def __init__(self, *, timeout_seconds: int) -> None:
+        self._timeout_seconds = timeout_seconds
+        self._entries: dict[tuple[str, str], _GoldCacheEntry] = {}
+        self._lock = threading.Lock()
+
+    def get(self, mutation: MutationRecord) -> list[tuple[Any, ...]]:
+        """Return cached gold rows, computing them once when needed."""
+
+        key = (mutation.sqlite_path, mutation.gold_sql)
+        with self._lock:
+            entry = self._entries.get(key)
+            owner = entry is None
+            if owner:
+                entry = _GoldCacheEntry(ready=threading.Event())
+                self._entries[key] = entry
+
+        if owner:
+            try:
+                entry.value = _execute_sql(
+                    Path(mutation.sqlite_path),
+                    mutation.gold_sql,
+                    timeout_seconds=self._timeout_seconds,
+                )
+            except Exception as exc:
+                entry.error = exc
+                LOGGER.warning(
+                    "Gold query failed mutant_id=%s db=%s error=%s",
+                    mutation.mutant_id,
+                    mutation.sqlite_path,
+                    exc,
+                )
+            finally:
+                entry.ready.set()
+        else:
+            entry.ready.wait()
+
+        if entry.error is not None:
+            raise entry.error
+        assert entry.value is not None
+        return entry.value
+
+
+def _execute_mutation(
+    mutation: MutationRecord,
+    *,
+    timeout_seconds: int,
+    gold_cache: _GoldQueryCache,
+) -> ExecutionRecord:
+    """Execute one mutant against SQLite."""
+
+    assert mutation.mutant_sql is not None
+    try:
+        gold_rows = gold_cache.get(mutation)
+    except Exception as exc:
+        LOGGER.warning(
+            "Execution error phase=gold mutant_id=%s error=%s",
+            mutation.mutant_id,
+            exc,
+        )
+        return _error_record(mutation, "gold", exc)
+
+    try:
+        mutant_rows = _execute_sql(
+            Path(mutation.sqlite_path),
+            mutation.mutant_sql,
+            timeout_seconds=timeout_seconds,
+        )
+    except Exception as exc:
+        LOGGER.warning(
+            "Execution error phase=mutant mutant_id=%s error=%s",
+            mutation.mutant_id,
+            exc,
+        )
+        return _error_record(mutation, "mutant", exc)
+
+    outcome: ExecutionOutcome = "survived" if gold_rows == mutant_rows else "killed"
+    LOGGER.debug(
+        "Execution compared mutant_id=%s outcome=%s gold_rows=%s mutant_rows=%s",
+        mutation.mutant_id,
+        outcome,
+        len(gold_rows),
+        len(mutant_rows),
+    )
+    return ExecutionRecord(
+        mutant_id=mutation.mutant_id,
+        example_id=mutation.example_id,
+        outcome=outcome,
+        gold_sql=mutation.gold_sql,
+        mutant_sql=mutation.mutant_sql,
+        sqlite_path=mutation.sqlite_path,
+        rule=mutation.rule,
+        profile=mutation.profile,
+        gold_row_count=len(gold_rows),
+        mutant_row_count=len(mutant_rows),
+        gold_sample=_sample_rows(gold_rows),
+        mutant_sample=_sample_rows(mutant_rows),
+    )
 
 
 def read_execution_records(path: Path) -> list[ExecutionRecord]:

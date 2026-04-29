@@ -21,6 +21,7 @@ from sqlmt.models import (
     MutationRecord,
 )
 from sqlmt.mutation.generator import read_mutation_records
+from sqlmt.parallel import ordered_parallel_map
 
 
 class SQLDrillerRunner(Protocol):
@@ -48,7 +49,7 @@ def run_counterexample_generation(
 
     LOGGER.info(
         "Counterexample stage start mutants=%s equivalence=%s execution=%s "
-        "output=%s resume=%s overwrite=%s sqldriller_timeout=%s",
+        "output=%s resume=%s overwrite=%s sqldriller_timeout=%s workers=%s",
         artifacts.mutants,
         artifacts.equivalence,
         artifacts.execution,
@@ -56,6 +57,7 @@ def run_counterexample_generation(
         config.resume,
         config.overwrite,
         config.timeouts.sqldriller_seconds,
+        config.workers,
     )
     manifest_exists = artifacts.counterexamples.exists()
     output_dir_exists = artifacts.counterexamples_dir.exists()
@@ -151,15 +153,18 @@ def run_counterexample_generation(
 
     new_records: list[CounterexampleRecord] = []
     active_runner = runner or _run_subprocess
-    for mutation in pending:
-        record = _generate_counterexample(
+    for record in ordered_parallel_map(
+        pending,
+        workers=config.workers,
+        fn=lambda mutation: _generate_counterexample(
             mutation,
             config=config,
             artifacts=artifacts,
             runner=active_runner,
             sqldriller_path=sqldriller_path,
             sqldriller_python=sqldriller_python,
-        )
+        ),
+    ):
         _record_result(
             new_records,
             record,
