@@ -8,7 +8,7 @@ import logging
 import shutil
 import sqlite3
 from collections import defaultdict
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TextIO
 
@@ -348,11 +348,11 @@ def _augment_database(
     )
 
 
+@dataclass
 class _MergeResult:
-    def __init__(self) -> None:
-        self.inserted = 0
-        self.skipped = 0
-        self.warnings: list[str] = []
+    inserted: int = 0
+    skipped: int = 0
+    warnings: list[str] = field(default_factory=list)
 
 
 def _merge_counterexample(source_path: Path, target_path: Path) -> _MergeResult:
@@ -361,10 +361,11 @@ def _merge_counterexample(source_path: Path, target_path: Path) -> _MergeResult:
     target = sqlite3.connect(target_path)
     try:
         source.row_factory = sqlite3.Row
+        target_tables = _table_names(target)
         for table in _table_names(source):
             source_columns = _column_names(source, table)
             row_count = _row_count(source, table)
-            if table not in _table_names(target):
+            if table not in target_tables:
                 result.skipped += row_count
                 result.warnings.append(f"missing table skipped: {table}")
                 continue
