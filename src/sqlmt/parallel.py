@@ -69,4 +69,4 @@ def ordered_parallel_map(
                 yield completed.value
                 submit_until_full()
     finally:
-        executor.shutdown(wait=False, cancel_futures=True)
+        executor.shutdown(wait=True, cancel_futures=True)

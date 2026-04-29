@@ -402,6 +402,43 @@ def test_sqlite_execution_workers_one_preserves_serial_execution(
     assert max_active_mutants == 1
 
 
+def test_sqlite_execution_shared_gold_baseexception_propagates_to_waiters(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "company.sqlite"
+    mutation = _mutation("shared", db_path=db_path)
+    cache = execution._GoldQueryCache(timeout_seconds=1)
+    errors: list[type[BaseException]] = []
+
+    def fake_execute_sql(
+        path: Path,
+        sql: str,
+        *,
+        timeout_seconds: int,
+    ) -> list[tuple[Any, ...]]:
+        time.sleep(0.02)
+        raise KeyboardInterrupt
+
+    def run_get() -> None:
+        try:
+            cache.get(mutation)
+        except BaseException as exc:  # noqa: B036
+            errors.append(type(exc))
+
+    monkeypatch.setattr(execution, "_execute_sql", fake_execute_sql)
+
+    owner = threading.Thread(target=run_get)
+    waiter = threading.Thread(target=run_get)
+    owner.start()
+    time.sleep(0.005)
+    waiter.start()
+    owner.join()
+    waiter.join()
+
+    assert errors == [KeyboardInterrupt, KeyboardInterrupt]
+
+
 def test_sqlite_execution_does_not_rewrite_checkpointed_artifact(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

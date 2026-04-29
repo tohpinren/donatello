@@ -7,6 +7,7 @@ import logging
 import shutil
 import subprocess
 import tempfile
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol, TextIO
 
@@ -37,6 +38,14 @@ class SQLDrillerRunner(Protocol):
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _CounterexampleResult:
+    """One worker result plus its staged output directory, if any."""
+
+    record: CounterexampleRecord
+    staging_dir: Path | None = None
 
 
 def run_counterexample_generation(
@@ -153,7 +162,7 @@ def run_counterexample_generation(
 
     new_records: list[CounterexampleRecord] = []
     active_runner = runner or _run_subprocess
-    for record in ordered_parallel_map(
+    for result in ordered_parallel_map(
         pending,
         workers=config.workers,
         fn=lambda mutation: _generate_counterexample(
@@ -165,6 +174,10 @@ def run_counterexample_generation(
             sqldriller_python=sqldriller_python,
         ),
     ):
+        record = _materialize_counterexample_result(
+            result,
+            output_dir=artifacts.counterexamples_dir,
+        )
         _record_result(
             new_records,
             record,
@@ -263,7 +276,7 @@ def _generate_counterexample(
     runner: SQLDrillerRunner,
     sqldriller_path: Path,
     sqldriller_python: Path,
-) -> CounterexampleRecord:
+) -> _CounterexampleResult:
     """Run the SQLDriller adapter for one selected mutant."""
 
     LOGGER.debug(
@@ -271,6 +284,9 @@ def _generate_counterexample(
         mutation.mutant_id,
         mutation.db_id,
         mutation.rule,
+    )
+    staging_dir = Path(
+        tempfile.mkdtemp(prefix="sqldriller-output-", dir=artifacts.root)
     )
     with tempfile.TemporaryDirectory(
         prefix="sqldriller-",
@@ -284,7 +300,7 @@ def _generate_counterexample(
                 _request_payload(
                     mutation,
                     sqldriller_root=sqldriller_path,
-                    output_dir=artifacts.counterexamples_dir,
+                    output_dir=staging_dir,
                 ),
                 ensure_ascii=True,
             ),
@@ -312,10 +328,13 @@ def _generate_counterexample(
                 config.timeouts.sqldriller_seconds,
                 exc,
             )
-            return _error_record(
-                mutation,
-                outcome="timeout",
-                error=str(exc),
+            shutil.rmtree(staging_dir, ignore_errors=True)
+            return _CounterexampleResult(
+                _error_record(
+                    mutation,
+                    outcome="timeout",
+                    error=str(exc),
+                )
             )
         except subprocess.CalledProcessError as exc:
             LOGGER.warning(
@@ -324,13 +343,60 @@ def _generate_counterexample(
                 exc.returncode,
                 exc.stderr or exc.stdout or str(exc),
             )
-            return _error_record(
-                mutation,
-                outcome="error",
-                error=exc.stderr or exc.stdout or str(exc),
+            shutil.rmtree(staging_dir, ignore_errors=True)
+            return _CounterexampleResult(
+                _error_record(
+                    mutation,
+                    outcome="error",
+                    error=exc.stderr or exc.stdout or str(exc),
+                )
             )
 
-        return _record_from_result_path(mutation, result_path)
+        record = _record_from_result_path(mutation, result_path)
+        if record.outcome != "generated":
+            shutil.rmtree(staging_dir, ignore_errors=True)
+            return _CounterexampleResult(record)
+        return _CounterexampleResult(record, staging_dir=staging_dir)
+
+
+def _materialize_counterexample_result(
+    result: _CounterexampleResult,
+    *,
+    output_dir: Path,
+) -> CounterexampleRecord:
+    """Move one staged counterexample into the final output directory."""
+
+    record = result.record
+    staging_dir = result.staging_dir
+    if staging_dir is None or record.counterexample_path is None:
+        return record
+
+    staged_path = Path(record.counterexample_path)
+    try:
+        relative_path = staged_path.relative_to(staging_dir)
+    except ValueError:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        return replace(
+            record,
+            outcome="error",
+            counterexample_path=None,
+            error="SQLDriller staged output escaped its worker staging directory.",
+        )
+
+    if not staged_path.exists():
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        return replace(
+            record,
+            outcome="error",
+            counterexample_path=None,
+            error="SQLDriller reported a counterexample without a staged file.",
+        )
+
+    final_path = output_dir / relative_path
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(staged_path), str(final_path))
+    shutil.rmtree(staging_dir, ignore_errors=True)
+    return replace(record, counterexample_path=str(final_path))
 
 
 def _record_from_result_path(

@@ -161,7 +161,7 @@ class _GoldCacheEntry:
 
     ready: threading.Event
     value: list[tuple[Any, ...]] | None = None
-    error: Exception | None = None
+    error: BaseException | None = None
 
 
 class _GoldQueryCache:
@@ -190,7 +190,7 @@ class _GoldQueryCache:
                     mutation.gold_sql,
                     timeout_seconds=self._timeout_seconds,
                 )
-            except Exception as exc:
+            except BaseException as exc:  # noqa: B036
                 entry.error = exc
                 LOGGER.warning(
                     "Gold query failed mutant_id=%s db=%s error=%s",

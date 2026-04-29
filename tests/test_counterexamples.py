@@ -75,12 +75,14 @@ def test_counterexample_generation_runs_only_survived_proven_non_equivalent_muta
     ) -> subprocess.CompletedProcess[str]:
         result_path = Path(command[command.index("--result-json") + 1])
         request_path = Path(command[command.index("--request-json") + 1])
-        mutant_id = str(
-            json.loads(request_path.read_text(encoding="utf-8"))["mutant_id"]
-        )
+        request = json.loads(request_path.read_text(encoding="utf-8"))
+        mutant_id = str(request["mutant_id"])
+        output_dir = Path(str(request["output_dir"]))
         seen.append(mutant_id)
+        counterexample_path = output_dir / "ce.sqlite"
+        counterexample_path.write_text("sqlite", encoding="utf-8")
         result_path.write_text(
-            json.dumps({"raw_tag": 0, "counterexample_path": str(cwd / "ce.sqlite")}),
+            json.dumps({"raw_tag": 0, "counterexample_path": str(counterexample_path)}),
             encoding="utf-8",
         )
         return subprocess.CompletedProcess(command, 0, "", "")
@@ -145,16 +147,18 @@ def test_counterexample_generation_maps_outcomes(tmp_path: Path) -> None:
     ) -> subprocess.CompletedProcess[str]:
         request_path = Path(command[command.index("--request-json") + 1])
         result_path = Path(command[command.index("--result-json") + 1])
-        mutant_id = str(
-            json.loads(request_path.read_text(encoding="utf-8"))["mutant_id"]
-        )
+        request = json.loads(request_path.read_text(encoding="utf-8"))
+        mutant_id = str(request["mutant_id"])
+        output_dir = Path(str(request["output_dir"]))
         if mutant_id == "timeout":
             raise subprocess.TimeoutExpired(command, timeout)
         if mutant_id == "failure":
             raise subprocess.CalledProcessError(1, command, stderr="adapter failed")
 
+        generated_path = output_dir / "ce.sqlite"
+        generated_path.write_text("sqlite", encoding="utf-8")
         payload = {
-            "generated": {"raw_tag": 0, "counterexample_path": str(cwd / "ce.sqlite")},
+            "generated": {"raw_tag": 0, "counterexample_path": str(generated_path)},
             "equivalent": {"raw_tag": 1, "counterexample_path": None},
             "unknown": {"raw_tag": -1, "counterexample_path": None},
         }[mutant_id]
@@ -259,12 +263,14 @@ def test_counterexample_generation_resumes_partial_artifact(
     ) -> subprocess.CompletedProcess[str]:
         request_path = Path(command[command.index("--request-json") + 1])
         result_path = Path(command[command.index("--result-json") + 1])
-        mutant_id = str(
-            json.loads(request_path.read_text(encoding="utf-8"))["mutant_id"]
-        )
+        request = json.loads(request_path.read_text(encoding="utf-8"))
+        mutant_id = str(request["mutant_id"])
+        output_dir = Path(str(request["output_dir"]))
         seen.append(mutant_id)
+        counterexample_path = output_dir / "ce.sqlite"
+        counterexample_path.write_text("sqlite", encoding="utf-8")
         result_path.write_text(
-            json.dumps({"raw_tag": 0, "counterexample_path": str(cwd / "ce.sqlite")}),
+            json.dumps({"raw_tag": 0, "counterexample_path": str(counterexample_path)}),
             encoding="utf-8",
         )
         return subprocess.CompletedProcess(command, 0, "", "")
@@ -334,9 +340,13 @@ def test_counterexample_generation_parallelizes_and_preserves_record_order(
         time.sleep({"first": 0.05, "second": 0.01, "third": 0.0}[mutant_id])
         with lock:
             active -= 1
+        request = json.loads(request_path.read_text(encoding="utf-8"))
+        output_dir = Path(str(request["output_dir"]))
+        staged_path = output_dir / f"{mutant_id}.sqlite"
+        staged_path.write_text("sqlite", encoding="utf-8")
         payload = {
             "raw_tag": 0,
-            "counterexample_path": str(cwd / f"{mutant_id}.sqlite"),
+            "counterexample_path": str(staged_path),
         }
         result_path.write_text(
             json.dumps(payload),
@@ -417,6 +427,67 @@ def test_counterexample_generation_workers_one_preserves_serial_execution(
 
     assert summary.selected_count == 2
     assert max_active == 1
+
+
+def test_counterexample_generation_interrupt_does_not_leave_untracked_outputs(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "company.sqlite"
+    artifacts = artifacts_for(tmp_path / "outputs")
+    artifacts.ensure_base_dirs()
+    write_mutation_records(
+        artifacts.mutants,
+        [
+            _mutation("first", db_path=db_path),
+            _mutation("second", db_path=db_path),
+        ],
+    )
+    write_equivalence_records(
+        artifacts.equivalence,
+        [
+            _equivalence("first", "proven_non_equivalent"),
+            _equivalence("second", "proven_non_equivalent"),
+        ],
+    )
+    write_execution_records(
+        artifacts.execution,
+        [
+            _execution("first", "survived", db_path=db_path),
+            _execution("second", "survived", db_path=db_path),
+        ],
+    )
+
+    def fake_runner(
+        command: list[str],
+        *,
+        cwd: Path,
+        timeout: int,
+    ) -> subprocess.CompletedProcess[str]:
+        request_path = Path(command[command.index("--request-json") + 1])
+        result_path = Path(command[command.index("--result-json") + 1])
+        request = json.loads(request_path.read_text(encoding="utf-8"))
+        output_dir = Path(str(request["output_dir"]))
+        mutant_id = str(request["mutant_id"])
+        if mutant_id == "first":
+            time.sleep(0.02)
+            raise KeyboardInterrupt
+        staged_path = output_dir / f"{mutant_id}.sqlite"
+        staged_path.write_text("sqlite", encoding="utf-8")
+        result_path.write_text(
+            json.dumps({"raw_tag": 0, "counterexample_path": str(staged_path)}),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    with pytest.raises(KeyboardInterrupt):
+        counterexamples.run_counterexample_generation(
+            _config(tmp_path, workers=2),
+            artifacts=artifacts,
+            runner=fake_runner,
+        )
+
+    assert list(artifacts.counterexamples_dir.iterdir()) == []
+    assert counterexamples.read_counterexample_records(artifacts.counterexamples) == []
 
 
 def test_counterexample_generation_overwrites_existing_artifacts(
