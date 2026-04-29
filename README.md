@@ -276,7 +276,10 @@ outputs/
     counterexamples.jsonl
     counterexamples/
     augmented_databases/
+      augmentation.jsonl
+    execution_augmented.jsonl
     report.md
+    report.json
 ```
 
 Current stage behavior:
@@ -292,6 +295,13 @@ Current stage behavior:
   `execution.jsonl`, runs only `survived` plus `proven_non_equivalent` mutants,
   uses SQLDriller `exec` mode only, writes `counterexamples.jsonl`, and stores
   minimized SQLite files under `counterexamples/`
+- augmentation reads `mutants.jsonl`, `equivalence.jsonl`, `execution.jsonl`,
+  and `counterexamples.jsonl`, copies original SQLite databases into
+  `augmented_databases/`, conservatively merges generated counterexample rows,
+  reruns covered mutants against the augmented copies, writes
+  `augmented_databases/augmentation.jsonl` and `execution_augmented.jsonl`, and
+  recomputes mutation scores
+- reporting reads available artifacts and writes `report.md` plus `report.json`
 - `resume: true` reuses existing artifacts
 - `overwrite: true` replaces them
 
@@ -302,6 +312,8 @@ killed / (killed + survived)
 ```
 
 Execution timeouts and errors are reported separately and excluded from the score.
+Augmented execution uses the same formula after counterexample rows have been
+merged into copied databases.
 
 ## Mutation Profile
 

@@ -67,10 +67,28 @@ class ExperimentArtifacts:
         return self.root / "augmented_databases"
 
     @property
+    def augmentation(self) -> Path:
+        """Return the manifest of augmented database copies."""
+
+        return self.augmented_databases_dir / "augmentation.jsonl"
+
+    @property
+    def augmented_execution(self) -> Path:
+        """Return SQLite execution results against augmented database copies."""
+
+        return self.root / "execution_augmented.jsonl"
+
+    @property
     def report(self) -> Path:
         """Return the reserved path for the top-level report artifact."""
 
         return self.root / "report.md"
+
+    @property
+    def report_json(self) -> Path:
+        """Return the reserved path for the machine-readable report artifact."""
+
+        return self.root / "report.json"
 
     def ensure_base_dirs(self) -> None:
         """Create the output directories needed before a run can write logs."""
@@ -91,7 +109,10 @@ class ExperimentArtifacts:
             "counterexamples": str(self.counterexamples),
             "counterexamples_dir": str(self.counterexamples_dir),
             "augmented_databases_dir": str(self.augmented_databases_dir),
+            "augmentation": str(self.augmentation),
+            "augmented_execution": str(self.augmented_execution),
             "report": str(self.report),
+            "report_json": str(self.report_json),
         }
 
 

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from sqlmt.artifacts import ExperimentArtifacts, artifacts_for
+from sqlmt.augmentation import run_augmentation as _run_augmentation
 from sqlmt.benchmarks import BenchmarkError, normalize_examples
 from sqlmt.config import ExperimentConfig
 from sqlmt.counterexamples import (
@@ -16,11 +17,13 @@ from sqlmt.counterexamples import (
 from sqlmt.equivalence import run_equivalence_filtering as _run_equivalence_filtering
 from sqlmt.execution import run_sqlite_execution as _run_sqlite_execution
 from sqlmt.models import (
+    AugmentationSummary,
     CounterexampleSummary,
     ExecutionSummary,
     MutationSummary,
     NormalizationSummary,
     NormalizedExample,
+    ReportSummary,
 )
 from sqlmt.mutation.generator import (
     generate_mutations,
@@ -29,6 +32,7 @@ from sqlmt.mutation.generator import (
     summarize_mutations,
     write_mutation_records,
 )
+from sqlmt.reporting import run_reporting as _run_reporting
 
 LOGGER = logging.getLogger(__name__)
 
@@ -88,12 +92,15 @@ def preflight_run(config: ExperimentConfig) -> None:
         and not config.stages.equivalence
         and not config.stages.execute
         and not config.stages.counterexamples
+        and not config.stages.augment
+        and not config.stages.report
     ):
         raise PipelineError(
             "No implemented stage is enabled. "
             "Set stages.normalize: true, stages.mutate: true, "
             "stages.equivalence: true, stages.execute: true, "
-            "or stages.counterexamples: true."
+            "stages.counterexamples: true, stages.augment: true, "
+            "or stages.report: true."
         )
     if config.stages.mutate and not config.stages.normalize:
         artifacts = artifacts_for(config.output_dir)
@@ -145,6 +152,29 @@ def preflight_run(config: ExperimentConfig) -> None:
                 "Counterexample generation requires execution.jsonl when "
                 "stages.execute is false, but execution.jsonl does not exist."
             )
+    if config.stages.augment:
+        artifacts = artifacts_for(config.output_dir)
+        if not config.stages.mutate and not artifacts.mutants.exists():
+            raise PipelineError(
+                "Augmentation requires mutants.jsonl when stages.mutate is false, "
+                "but mutants.jsonl does not exist."
+            )
+        if not config.stages.equivalence and not artifacts.equivalence.exists():
+            raise PipelineError(
+                "Augmentation requires equivalence.jsonl when "
+                "stages.equivalence is false, but equivalence.jsonl does not exist."
+            )
+        if not config.stages.execute and not artifacts.execution.exists():
+            raise PipelineError(
+                "Augmentation requires execution.jsonl when stages.execute is false, "
+                "but execution.jsonl does not exist."
+            )
+        if not config.stages.counterexamples and not artifacts.counterexamples.exists():
+            raise PipelineError(
+                "Augmentation requires counterexamples.jsonl when "
+                "stages.counterexamples is false, but counterexamples.jsonl "
+                "does not exist."
+            )
 
 
 def run_equivalence_filtering(
@@ -182,6 +212,32 @@ def run_counterexample_generation(
 
     try:
         return _run_counterexample_generation(config, artifacts=artifacts)
+    except ValueError as exc:
+        raise PipelineError(str(exc)) from exc
+
+
+def run_augmentation(
+    config: ExperimentConfig,
+    *,
+    artifacts: ExperimentArtifacts,
+) -> AugmentationSummary:
+    """Execute or resume database augmentation and rerun verification."""
+
+    try:
+        return _run_augmentation(config, artifacts=artifacts)
+    except ValueError as exc:
+        raise PipelineError(str(exc)) from exc
+
+
+def run_reporting(
+    config: ExperimentConfig,
+    *,
+    artifacts: ExperimentArtifacts,
+) -> ReportSummary:
+    """Generate Markdown and JSON reports from available artifacts."""
+
+    try:
+        return _run_reporting(config, artifacts=artifacts)
     except ValueError as exc:
         raise PipelineError(str(exc)) from exc
 

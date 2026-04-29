@@ -18,10 +18,12 @@ from sqlmt.pipeline import (
     build_dry_run_plan,
     preflight_run,
     prepare_run,
+    run_augmentation,
     run_counterexample_generation,
     run_equivalence_filtering,
     run_mutation_generation,
     run_normalization,
+    run_reporting,
     run_sqlite_execution,
 )
 
@@ -231,6 +233,8 @@ def run(
     equivalence_summary = None
     execution_summary = None
     counterexample_summary = None
+    augmentation_summary = None
+    report_summary = None
 
     try:
         if loaded.stages.normalize:
@@ -262,6 +266,18 @@ def run(
         if loaded.stages.counterexamples:
             LOGGER.info("Running stage=counterexamples")
             counterexample_summary = run_counterexample_generation(
+                loaded,
+                artifacts=artifacts,
+            )
+        if loaded.stages.augment:
+            LOGGER.info("Running stage=augment")
+            augmentation_summary = run_augmentation(
+                loaded,
+                artifacts=artifacts,
+            )
+        if loaded.stages.report:
+            LOGGER.info("Running stage=report")
+            report_summary = run_reporting(
                 loaded,
                 artifacts=artifacts,
             )
@@ -307,9 +323,7 @@ def run(
         typer.echo(f"Wrote: {equivalence_summary.output_path}")
 
     if execution_summary is not None:
-        action = (
-            "Reused execution" if execution_summary.resumed else "Executed"
-        )
+        action = "Reused execution" if execution_summary.resumed else "Executed"
         score = (
             f"{execution_summary.mutation_score:.4f}"
             if execution_summary.mutation_score is not None
@@ -341,24 +355,56 @@ def run(
         typer.echo(f"Wrote: {counterexample_summary.output_path}")
         typer.echo(f"Counterexample files: {counterexample_summary.output_dir}")
 
+    if augmentation_summary is not None:
+        action = "Reused augmentation" if augmentation_summary.resumed else "Augmented"
+        score = (
+            f"{augmentation_summary.augmented_execution.mutation_score:.4f}"
+            if augmentation_summary.augmented_execution.mutation_score is not None
+            else "n/a"
+        )
+        typer.echo(
+            f"{action} {augmentation_summary.database_count} databases from "
+            f"{augmentation_summary.counterexample_count} generated "
+            f"counterexamples: {augmentation_summary.inserted_row_count} "
+            f"inserted rows, {augmentation_summary.skipped_row_count} skipped "
+            f"rows, mutation score {score}."
+        )
+        typer.echo(f"Wrote: {augmentation_summary.output_path}")
+        typer.echo(
+            "Augmented execution: "
+            f"{augmentation_summary.augmented_execution.output_path}"
+        )
+
+    if report_summary is not None:
+        typer.echo(f"Wrote report: {report_summary.output_path}")
+        typer.echo(f"Wrote report JSON: {report_summary.json_output_path}")
+
     LOGGER.info("Experiment completed successfully name=%s", loaded.experiment_name)
 
     skipped_stages = (
-        counterexample_summary.skipped_stages
-        if counterexample_summary is not None
+        report_summary.skipped_stages
+        if report_summary is not None
         else (
-            execution_summary.skipped_stages
-            if execution_summary is not None
+            augmentation_summary.skipped_stages
+            if augmentation_summary is not None
             else (
-                equivalence_summary.skipped_stages
-                if equivalence_summary is not None
+                counterexample_summary.skipped_stages
+                if counterexample_summary is not None
                 else (
-                    mutation_summary.skipped_stages
-                    if mutation_summary is not None
+                    execution_summary.skipped_stages
+                    if execution_summary is not None
                     else (
-                        normalization_summary.skipped_stages
-                        if normalization_summary is not None
-                        else []
+                        equivalence_summary.skipped_stages
+                        if equivalence_summary is not None
+                        else (
+                            mutation_summary.skipped_stages
+                            if mutation_summary is not None
+                            else (
+                                normalization_summary.skipped_stages
+                                if normalization_summary is not None
+                                else []
+                            )
+                        )
                     )
                 )
             )
