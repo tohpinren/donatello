@@ -19,4 +19,11 @@ def test_artifact_layout_paths() -> None:
     assert artifacts.augmented_databases_dir == Path(
         "outputs/bird-dev/augmented_databases"
     )
+    assert artifacts.augmentation == Path(
+        "outputs/bird-dev/augmented_databases/augmentation.jsonl"
+    )
+    assert artifacts.augmented_execution == Path(
+        "outputs/bird-dev/execution_augmented.jsonl"
+    )
     assert artifacts.report == Path("outputs/bird-dev/report.md")
+    assert artifacts.report_json == Path("outputs/bird-dev/report.json")

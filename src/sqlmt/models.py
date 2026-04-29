@@ -463,3 +463,83 @@ class CounterexampleSummary:
     output_dir: str
     resumed: bool = False
     skipped_stages: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class AugmentationRecord:
+    """One augmented SQLite database copy and its merge outcomes."""
+
+    source_sqlite_path: str
+    augmented_sqlite_path: str
+    db_id: str
+    mutant_ids: list[str]
+    merged_mutant_ids: list[str]
+    counterexample_count: int
+    inserted_row_count: int
+    skipped_row_count: int
+    warnings: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, object]:
+        """Serialize one augmentation record into the JSONL artifact shape."""
+
+        return {
+            "source_sqlite_path": self.source_sqlite_path,
+            "augmented_sqlite_path": self.augmented_sqlite_path,
+            "db_id": self.db_id,
+            "mutant_ids": self.mutant_ids,
+            "merged_mutant_ids": self.merged_mutant_ids,
+            "counterexample_count": self.counterexample_count,
+            "inserted_row_count": self.inserted_row_count,
+            "skipped_row_count": self.skipped_row_count,
+            "warnings": self.warnings,
+            "errors": self.errors,
+        }
+
+    @classmethod
+    def from_dict(cls, row: dict[str, Any]) -> AugmentationRecord:
+        """Parse an augmentation record read back from JSONL."""
+
+        mutant_ids = [str(value) for value in row.get("mutant_ids", [])]
+        return cls(
+            source_sqlite_path=str(row["source_sqlite_path"]),
+            augmented_sqlite_path=str(row["augmented_sqlite_path"]),
+            db_id=str(row["db_id"]),
+            mutant_ids=mutant_ids,
+            merged_mutant_ids=[
+                str(value) for value in row.get("merged_mutant_ids", mutant_ids)
+            ],
+            counterexample_count=int(row["counterexample_count"]),
+            inserted_row_count=int(row["inserted_row_count"]),
+            skipped_row_count=int(row["skipped_row_count"]),
+            warnings=[str(value) for value in row.get("warnings", [])],
+            errors=[str(value) for value in row.get("errors", [])],
+        )
+
+
+@dataclass(frozen=True)
+class AugmentationSummary:
+    """High-level counts and rerun score for database augmentation."""
+
+    database_count: int
+    counterexample_count: int
+    inserted_row_count: int
+    skipped_row_count: int
+    warning_count: int
+    error_count: int
+    output_path: str
+    output_dir: str
+    augmented_execution: ExecutionSummary
+    resumed: bool = False
+    skipped_stages: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ReportSummary:
+    """Output metadata for report generation."""
+
+    output_path: str
+    json_output_path: str
+    sections: dict[str, str]
+    resumed: bool = False
+    skipped_stages: list[str] = field(default_factory=list)

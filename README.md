@@ -29,13 +29,17 @@ What works today:
   survived, timeout, error, and mutation-score outputs
 - SQLDriller counterexample generation for survived proven non-equivalent
   mutants, using SQLDriller `exec` mode only
+- database augmentation from generated SQLDriller counterexamples, with
+  conservative row merging into copied SQLite databases and augmented reruns
+- Markdown and JSON reports for before/after mutation-score summaries
 - resumable artifact-based runs driven by YAML config files
 - `uv`-managed Python environment with Ruff, Ty, and pytest
 
 What is planned next:
 
 - Spider 2.0 SQLite-subset normalization
-- reporting and benchmark augmentation
+- model execution-accuracy comparison after the benchmark quality pipeline is
+  reliable
 
 ## Install
 
@@ -218,8 +222,8 @@ Main fields:
 - `output_dir`: artifact directory for the run
 - `mutation_profile`: currently `canonical`
 - `resume` / `overwrite`: artifact reuse behavior
-- `stages`: enable `normalize`, `mutate`, `equivalence`, `execute`, and
-  `counterexamples` today
+- `stages`: enable `normalize`, `mutate`, `equivalence`, `execute`,
+  `counterexamples`, `augment`, and `report`
 
 Example local config:
 
@@ -258,6 +262,37 @@ tools:
 Use [`configs/templates/local.yaml.example`](configs/templates/local.yaml.example)
 as the starting point for machine-specific configs.
 
+### Running Augmentation and Reporting
+
+Augmentation is intended to run after counterexamples exist. A typical follow-up
+config reuses an existing experiment output directory and enables only the final
+stages:
+
+```yaml
+resume: true
+overwrite: false
+
+stages:
+  normalize: false
+  mutate: false
+  equivalence: false
+  execute: false
+  counterexamples: false
+  augment: true
+  report: true
+```
+
+Then run:
+
+```bash
+uv run sqlmt run --config configs/local/<name>.yaml
+```
+
+`augment` requires `mutants.jsonl`, `equivalence.jsonl`, `execution.jsonl`, and
+`counterexamples.jsonl` to already exist unless those upstream stages are
+enabled in the same run. `report` can run on partial outputs and marks missing
+sections as unavailable.
+
 ## Artifacts
 
 Each run writes to its own directory under `outputs/`.
@@ -276,7 +311,10 @@ outputs/
     counterexamples.jsonl
     counterexamples/
     augmented_databases/
+      augmentation.jsonl
+    execution_augmented.jsonl
     report.md
+    report.json
 ```
 
 Current stage behavior:
@@ -292,6 +330,13 @@ Current stage behavior:
   `execution.jsonl`, runs only `survived` plus `proven_non_equivalent` mutants,
   uses SQLDriller `exec` mode only, writes `counterexamples.jsonl`, and stores
   minimized SQLite files under `counterexamples/`
+- augmentation reads `mutants.jsonl`, `equivalence.jsonl`, `execution.jsonl`,
+  and `counterexamples.jsonl`, copies original SQLite databases into
+  `augmented_databases/`, conservatively merges generated counterexample rows,
+  reruns covered mutants against the augmented copies, writes
+  `augmented_databases/augmentation.jsonl` and `execution_augmented.jsonl`, and
+  recomputes mutation scores
+- reporting reads available artifacts and writes `report.md` plus `report.json`
 - `resume: true` reuses existing artifacts
 - `overwrite: true` replaces them
 
@@ -302,6 +347,8 @@ killed / (killed + survived)
 ```
 
 Execution timeouts and errors are reported separately and excluded from the score.
+Augmented execution uses the same formula after counterexample rows have been
+merged into copied databases.
 
 ## Mutation Profile
 
