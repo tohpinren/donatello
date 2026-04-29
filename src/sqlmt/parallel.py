@@ -24,6 +24,7 @@ def ordered_parallel_map(
     *,
     workers: int,
     fn: Callable[[ItemT], ResultT],
+    abandon: Callable[[ResultT], None] | None = None,
 ) -> Iterator[ResultT]:
     """Yield results in input order while running up to ``workers`` tasks at once."""
 
@@ -70,3 +71,33 @@ def ordered_parallel_map(
                 submit_until_full()
     finally:
         executor.shutdown(wait=True, cancel_futures=True)
+        _abandon_buffered_results(
+            buffered,
+            futures,
+            abandon=abandon,
+        )
+
+
+def _abandon_buffered_results(
+    buffered: dict[int, _Completed[ResultT]],
+    futures: dict[Future[ResultT], int],
+    *,
+    abandon: Callable[[ResultT], None] | None,
+) -> None:
+    """Clean up finished values when the consumer exits before yielding them."""
+
+    if abandon is None:
+        return
+
+    for completed in buffered.values():
+        if completed.error is None and completed.value is not None:
+            abandon(completed.value)
+
+    for future in futures:
+        if future.cancelled():
+            continue
+        try:
+            value = future.result()
+        except BaseException:  # noqa: B036
+            continue
+        abandon(value)

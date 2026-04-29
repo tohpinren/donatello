@@ -488,6 +488,7 @@ def test_counterexample_generation_interrupt_does_not_leave_untracked_outputs(
 
     assert list(artifacts.counterexamples_dir.iterdir()) == []
     assert counterexamples.read_counterexample_records(artifacts.counterexamples) == []
+    assert _staging_dirs(artifacts.root) == []
 
 
 def test_counterexample_generation_overwrites_existing_artifacts(
@@ -629,4 +630,12 @@ def _execution(
         sqlite_path=str(db_path),
         rule="c_multi_dist",
         profile="canonical",
+    )
+
+
+def _staging_dirs(root: Path) -> list[Path]:
+    return sorted(
+        path
+        for path in root.iterdir()
+        if path.name.startswith("sqldriller-output-")
     )

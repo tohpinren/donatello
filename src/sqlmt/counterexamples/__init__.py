@@ -173,6 +173,7 @@ def run_counterexample_generation(
             sqldriller_path=sqldriller_path,
             sqldriller_python=sqldriller_python,
         ),
+        abandon=_discard_counterexample_result,
     ):
         record = _materialize_counterexample_result(
             result,
@@ -288,75 +289,79 @@ def _generate_counterexample(
     staging_dir = Path(
         tempfile.mkdtemp(prefix="sqldriller-output-", dir=artifacts.root)
     )
-    with tempfile.TemporaryDirectory(
-        prefix="sqldriller-",
-        dir=artifacts.root,
-    ) as temp_dir_name:
-        temp_dir = Path(temp_dir_name)
-        request_path = temp_dir / "request.json"
-        result_path = temp_dir / "result.json"
-        request_path.write_text(
-            json.dumps(
-                _request_payload(
-                    mutation,
-                    sqldriller_root=sqldriller_path,
-                    output_dir=staging_dir,
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix="sqldriller-",
+            dir=artifacts.root,
+        ) as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            request_path = temp_dir / "request.json"
+            result_path = temp_dir / "result.json"
+            request_path.write_text(
+                json.dumps(
+                    _request_payload(
+                        mutation,
+                        sqldriller_root=sqldriller_path,
+                        output_dir=staging_dir,
+                    ),
+                    ensure_ascii=True,
                 ),
-                ensure_ascii=True,
-            ),
-            encoding="utf-8",
-        )
-
-        command = [
-            str(sqldriller_python),
-            str(_adapter_script_path()),
-            "--request-json",
-            str(request_path.resolve()),
-            "--result-json",
-            str(result_path.resolve()),
-        ]
-        try:
-            runner(
-                command,
-                cwd=sqldriller_path,
-                timeout=config.timeouts.sqldriller_seconds,
-            )
-        except subprocess.TimeoutExpired as exc:
-            LOGGER.warning(
-                "SQLDriller timeout mutant_id=%s timeout=%s error=%s",
-                mutation.mutant_id,
-                config.timeouts.sqldriller_seconds,
-                exc,
-            )
-            shutil.rmtree(staging_dir, ignore_errors=True)
-            return _CounterexampleResult(
-                _error_record(
-                    mutation,
-                    outcome="timeout",
-                    error=str(exc),
-                )
-            )
-        except subprocess.CalledProcessError as exc:
-            LOGGER.warning(
-                "SQLDriller failure mutant_id=%s code=%s error=%s",
-                mutation.mutant_id,
-                exc.returncode,
-                exc.stderr or exc.stdout or str(exc),
-            )
-            shutil.rmtree(staging_dir, ignore_errors=True)
-            return _CounterexampleResult(
-                _error_record(
-                    mutation,
-                    outcome="error",
-                    error=exc.stderr or exc.stdout or str(exc),
-                )
+                encoding="utf-8",
             )
 
-        record = _record_from_result_path(mutation, result_path)
-        if record.outcome != "generated":
-            shutil.rmtree(staging_dir, ignore_errors=True)
-            return _CounterexampleResult(record)
-        return _CounterexampleResult(record, staging_dir=staging_dir)
+            command = [
+                str(sqldriller_python),
+                str(_adapter_script_path()),
+                "--request-json",
+                str(request_path.resolve()),
+                "--result-json",
+                str(result_path.resolve()),
+            ]
+            try:
+                runner(
+                    command,
+                    cwd=sqldriller_path,
+                    timeout=config.timeouts.sqldriller_seconds,
+                )
+            except subprocess.TimeoutExpired as exc:
+                LOGGER.warning(
+                    "SQLDriller timeout mutant_id=%s timeout=%s error=%s",
+                    mutation.mutant_id,
+                    config.timeouts.sqldriller_seconds,
+                    exc,
+                )
+                shutil.rmtree(staging_dir, ignore_errors=True)
+                return _CounterexampleResult(
+                    _error_record(
+                        mutation,
+                        outcome="timeout",
+                        error=str(exc),
+                    )
+                )
+            except subprocess.CalledProcessError as exc:
+                LOGGER.warning(
+                    "SQLDriller failure mutant_id=%s code=%s error=%s",
+                    mutation.mutant_id,
+                    exc.returncode,
+                    exc.stderr or exc.stdout or str(exc),
+                )
+                shutil.rmtree(staging_dir, ignore_errors=True)
+                return _CounterexampleResult(
+                    _error_record(
+                        mutation,
+                        outcome="error",
+                        error=exc.stderr or exc.stdout or str(exc),
+                    )
+                )
+
+            record = _record_from_result_path(mutation, result_path)
+            if record.outcome != "generated":
+                shutil.rmtree(staging_dir, ignore_errors=True)
+                return _CounterexampleResult(record)
+            return _CounterexampleResult(record, staging_dir=staging_dir)
+    except BaseException:  # noqa: B036
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        raise
 
 
 def _materialize_counterexample_result(
@@ -397,6 +402,13 @@ def _materialize_counterexample_result(
     shutil.move(str(staged_path), str(final_path))
     shutil.rmtree(staging_dir, ignore_errors=True)
     return replace(record, counterexample_path=str(final_path))
+
+
+def _discard_counterexample_result(result: _CounterexampleResult) -> None:
+    """Clean up staged files when a completed result is never materialized."""
+
+    if result.staging_dir is not None:
+        shutil.rmtree(result.staging_dir, ignore_errors=True)
 
 
 def _record_from_result_path(
