@@ -473,6 +473,7 @@ class AugmentationRecord:
     augmented_sqlite_path: str
     db_id: str
     mutant_ids: list[str]
+    merged_mutant_ids: list[str]
     counterexample_count: int
     inserted_row_count: int
     skipped_row_count: int
@@ -487,6 +488,7 @@ class AugmentationRecord:
             "augmented_sqlite_path": self.augmented_sqlite_path,
             "db_id": self.db_id,
             "mutant_ids": self.mutant_ids,
+            "merged_mutant_ids": self.merged_mutant_ids,
             "counterexample_count": self.counterexample_count,
             "inserted_row_count": self.inserted_row_count,
             "skipped_row_count": self.skipped_row_count,
@@ -498,11 +500,15 @@ class AugmentationRecord:
     def from_dict(cls, row: dict[str, Any]) -> AugmentationRecord:
         """Parse an augmentation record read back from JSONL."""
 
+        mutant_ids = [str(value) for value in row.get("mutant_ids", [])]
         return cls(
             source_sqlite_path=str(row["source_sqlite_path"]),
             augmented_sqlite_path=str(row["augmented_sqlite_path"]),
             db_id=str(row["db_id"]),
-            mutant_ids=[str(value) for value in row.get("mutant_ids", [])],
+            mutant_ids=mutant_ids,
+            merged_mutant_ids=[
+                str(value) for value in row.get("merged_mutant_ids", mutant_ids)
+            ],
             counterexample_count=int(row["counterexample_count"]),
             inserted_row_count=int(row["inserted_row_count"]),
             skipped_row_count=int(row["skipped_row_count"]),

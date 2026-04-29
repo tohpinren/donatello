@@ -96,6 +96,34 @@ def test_augmentation_conservatively_warns_for_duplicates_and_schema_mismatches(
     assert "column mismatch skipped" in warnings
 
 
+def test_augmentation_reruns_successful_mutants_when_one_counterexample_fails(
+    tmp_path: Path,
+) -> None:
+    source_db = _write_company_db(tmp_path / "company.sqlite", [(1, "Ada")])
+    counterexample_db = _write_company_db(tmp_path / "ce.sqlite", [(2, "Grace")])
+    broken_db = tmp_path / "broken.sqlite"
+    broken_db.write_text("not sqlite", encoding="utf-8")
+    artifacts = artifacts_for(tmp_path / "outputs")
+    artifacts.ensure_base_dirs()
+    _write_base_artifacts(
+        artifacts,
+        source_db,
+        counterexample_db,
+        extra_counterexamples=[
+            _counterexample("m2", source_db, broken_db),
+        ],
+    )
+
+    summary = run_augmentation(_config(tmp_path), artifacts=artifacts)
+
+    assert summary.error_count == 1
+    rows = read_execution_records(artifacts.augmented_execution)
+    assert [(row.mutant_id, row.outcome) for row in rows] == [("m1", "killed")]
+    records = read_augmentation_records(artifacts.augmentation)
+    assert records[0].mutant_ids == ["m1", "m2"]
+    assert records[0].merged_mutant_ids == ["m1"]
+
+
 def test_augmentation_resumes_existing_artifacts(tmp_path: Path) -> None:
     source_db = _write_company_db(tmp_path / "company.sqlite", [(1, "Ada")])
     counterexample_db = _write_company_db(tmp_path / "ce.sqlite", [(2, "Grace")])

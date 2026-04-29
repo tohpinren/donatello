@@ -264,6 +264,7 @@ def _augment_database(
     target_path = artifacts.augmented_databases_dir / _target_name(source_path, db_id)
     warnings: list[str] = []
     errors: list[str] = []
+    merged_mutant_ids: list[str] = []
     inserted = 0
     skipped = 0
 
@@ -281,6 +282,7 @@ def _augment_database(
             augmented_sqlite_path=str(target_path),
             db_id=db_id,
             mutant_ids=_mutant_ids(records),
+            merged_mutant_ids=[],
             counterexample_count=len(records),
             inserted_row_count=0,
             skipped_row_count=0,
@@ -308,6 +310,7 @@ def _augment_database(
                 exc,
             )
             continue
+        merged_mutant_ids.append(record.mutant_id)
         inserted += result.inserted
         skipped += result.skipped
         for warning in result.warnings:
@@ -336,6 +339,7 @@ def _augment_database(
         augmented_sqlite_path=str(target_path),
         db_id=db_id,
         mutant_ids=_mutant_ids(records),
+        merged_mutant_ids=sorted(set(merged_mutant_ids)),
         counterexample_count=len(records),
         inserted_row_count=inserted,
         skipped_row_count=skipped,
@@ -411,9 +415,7 @@ def _rerun_mutations(
 ) -> list[MutationRecord]:
     rerun: list[MutationRecord] = []
     for record in records:
-        if record.errors:
-            continue
-        for mutant_id in record.mutant_ids:
+        for mutant_id in record.merged_mutant_ids:
             if (
                 mutant_id not in proven_non_equivalent_ids
                 or mutant_id not in survived_ids

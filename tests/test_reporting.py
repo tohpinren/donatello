@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import cast
 
+import pytest
+
 from sqlmt.artifacts import artifacts_for
 from sqlmt.augmentation import write_augmentation_records
 from sqlmt.counterexamples import write_counterexample_records
@@ -40,6 +42,7 @@ def test_reporting_writes_markdown_and_json_summary(tmp_path: Path) -> None:
                 augmented_sqlite_path="/tmp/augmented/company.sqlite",
                 db_id="company",
                 mutant_ids=["survived"],
+                merged_mutant_ids=["survived"],
                 counterexample_count=1,
                 inserted_row_count=1,
                 skipped_row_count=0,
@@ -85,6 +88,45 @@ def test_reporting_marks_missing_sections_unavailable(tmp_path: Path) -> None:
     assert "unavailable" in artifacts.report.read_text(encoding="utf-8")
 
 
+def test_reporting_resumes_existing_outputs_without_rewriting(tmp_path: Path) -> None:
+    artifacts = artifacts_for(tmp_path / "outputs")
+    artifacts.ensure_base_dirs()
+    artifacts.report.write_text("manual report\n", encoding="utf-8")
+    artifacts.report_json.write_text(
+        json.dumps({"sections": {"execution": "available"}}),
+        encoding="utf-8",
+    )
+
+    summary = run_reporting(_config(tmp_path, resume=True), artifacts=artifacts)
+
+    assert summary.resumed is True
+    assert summary.sections == {"execution": "available"}
+    assert artifacts.report.read_text(encoding="utf-8") == "manual report\n"
+
+
+def test_reporting_existing_outputs_require_resume_or_overwrite(
+    tmp_path: Path,
+) -> None:
+    artifacts = artifacts_for(tmp_path / "outputs")
+    artifacts.ensure_base_dirs()
+    artifacts.report.write_text("manual report\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Report outputs already exist"):
+        run_reporting(
+            _config(tmp_path, resume=False, overwrite=False), artifacts=artifacts
+        )
+
+    summary = run_reporting(
+        _config(tmp_path, resume=False, overwrite=True),
+        artifacts=artifacts,
+    )
+
+    assert summary.resumed is False
+    assert "# SQL Mutation Testing Report" in artifacts.report.read_text(
+        encoding="utf-8"
+    )
+
+
 def _execution(mutant_id: str, outcome: str, rule: str) -> ExecutionRecord:
     return ExecutionRecord(
         mutant_id=mutant_id,
@@ -113,7 +155,12 @@ def _counterexample(mutant_id: str) -> CounterexampleRecord:
     )
 
 
-def _config(tmp_path: Path):
+def _config(
+    tmp_path: Path,
+    *,
+    resume: bool = True,
+    overwrite: bool = False,
+):
     from sqlmt.config import ExperimentConfig, StageConfig
 
     return ExperimentConfig(
@@ -122,6 +169,8 @@ def _config(tmp_path: Path):
         bird_mode="dev",
         data_root=tmp_path / "bird",
         output_dir=tmp_path / "outputs",
+        resume=resume,
+        overwrite=overwrite,
         stages=StageConfig(
             normalize=False,
             mutate=False,

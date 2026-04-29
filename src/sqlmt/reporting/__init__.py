@@ -29,6 +29,28 @@ def run_reporting(
         artifacts.report,
         artifacts.report_json,
     )
+    existing_outputs = [
+        path for path in (artifacts.report, artifacts.report_json) if path.exists()
+    ]
+    if existing_outputs:
+        if config.resume:
+            LOGGER.info(
+                "Reporting stage resume outputs=%s",
+                ",".join(path.name for path in existing_outputs),
+            )
+            return _summarize_existing_report(artifacts)
+        if not config.overwrite:
+            raise ValueError(
+                "Report outputs already exist: "
+                + ", ".join(path.name for path in existing_outputs)
+                + ". Set resume: true to reuse them or overwrite: true to replace "
+                "them."
+            )
+    if config.overwrite:
+        for path in existing_outputs:
+            LOGGER.info("Reporting overwrite removing output=%s", path)
+            path.unlink()
+
     payload = _build_payload(config, artifacts)
     artifacts.report.write_text(_render_markdown(payload), encoding="utf-8")
     artifacts.report_json.write_text(
@@ -48,6 +70,26 @@ def run_reporting(
         output_path=str(artifacts.report),
         json_output_path=str(artifacts.report_json),
         sections=dict(payload["sections"]),
+        skipped_stages=[],
+    )
+
+
+def _summarize_existing_report(artifacts: ExperimentArtifacts) -> ReportSummary:
+    sections: dict[str, str] = {}
+    if artifacts.report_json.exists():
+        try:
+            payload = json.loads(artifacts.report_json.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            payload = {}
+        if isinstance(payload, dict) and isinstance(payload.get("sections"), dict):
+            sections = {
+                str(name): str(status) for name, status in payload["sections"].items()
+            }
+    return ReportSummary(
+        output_path=str(artifacts.report),
+        json_output_path=str(artifacts.report_json),
+        sections=sections,
+        resumed=True,
         skipped_stages=[],
     )
 
