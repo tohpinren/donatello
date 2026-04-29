@@ -53,6 +53,10 @@ def run_augmentation(
     ]
     if existing_outputs:
         if config.resume:
+            LOGGER.info(
+                "Augmentation stage resume outputs=%s",
+                ",".join(path.name for path in existing_outputs),
+            )
             return _summarize_existing_augmentation(config, artifacts)
         if not config.overwrite:
             raise ValueError(
@@ -64,8 +68,16 @@ def run_augmentation(
 
     if config.overwrite:
         if artifacts.augmented_databases_dir.exists():
+            LOGGER.info(
+                "Augmentation overwrite removing directory=%s",
+                artifacts.augmented_databases_dir,
+            )
             shutil.rmtree(artifacts.augmented_databases_dir)
         if artifacts.augmented_execution.exists():
+            LOGGER.info(
+                "Augmentation overwrite removing output=%s",
+                artifacts.augmented_execution,
+            )
             artifacts.augmented_execution.unlink()
 
     for artifact_path, missing_message in (
@@ -98,6 +110,14 @@ def run_augmentation(
     artifacts.augmented_databases_dir.mkdir(parents=True, exist_ok=True)
     mutation_by_id = {mutation.mutant_id: mutation for mutation in mutations}
     groups = _group_by_source(selected)
+    LOGGER.info(
+        "Augmentation selection counterexample_records=%s selected=%s "
+        "source_databases=%s mutations=%s",
+        len(counterexample_records),
+        len(selected),
+        len(groups),
+        len(mutations),
+    )
     augmentation_records = [
         _augment_database(source_path, records, artifacts=artifacts)
         for source_path, records in groups.items()
@@ -117,6 +137,11 @@ def run_augmentation(
             for record in execution_records
             if record.outcome == "survived"
         },
+    )
+    LOGGER.info(
+        "Augmentation rerun selected_mutants=%s output=%s",
+        len(rerun_mutations),
+        artifacts.augmented_execution,
     )
     if artifacts.augmented_execution.exists():
         artifacts.augmented_execution.unlink()
@@ -245,6 +270,12 @@ def _augment_database(
     try:
         shutil.copy2(source_path, target_path)
     except OSError as exc:
+        LOGGER.warning(
+            "Augmentation database copy failed source=%s target=%s error=%s",
+            source_path,
+            target_path,
+            exc,
+        )
         return AugmentationRecord(
             source_sqlite_path=str(source_path),
             augmented_sqlite_path=str(target_path),
@@ -255,6 +286,12 @@ def _augment_database(
             skipped_row_count=0,
             errors=[f"database copy failed: {exc}"],
         )
+    LOGGER.info(
+        "Augmentation database copied source=%s target=%s counterexamples=%s",
+        source_path,
+        target_path,
+        len(records),
+    )
 
     for record in records:
         counterexample_path = Path(record.counterexample_path or "")
@@ -262,10 +299,37 @@ def _augment_database(
             result = _merge_counterexample(counterexample_path, target_path)
         except sqlite3.Error as exc:
             errors.append(f"{record.mutant_id}: counterexample merge failed: {exc}")
+            LOGGER.warning(
+                "Augmentation counterexample merge failed mutant_id=%s "
+                "counterexample=%s target=%s error=%s",
+                record.mutant_id,
+                counterexample_path,
+                target_path,
+                exc,
+            )
             continue
         inserted += result.inserted
         skipped += result.skipped
-        warnings.extend(f"{record.mutant_id}: {warning}" for warning in result.warnings)
+        for warning in result.warnings:
+            warnings.append(f"{record.mutant_id}: {warning}")
+            LOGGER.warning(
+                "Augmentation merge warning mutant_id=%s counterexample=%s "
+                "target=%s warning=%s",
+                record.mutant_id,
+                counterexample_path,
+                target_path,
+                warning,
+            )
+        LOGGER.info(
+            "Augmentation counterexample merged mutant_id=%s counterexample=%s "
+            "target=%s inserted_rows=%s skipped_rows=%s warnings=%s",
+            record.mutant_id,
+            counterexample_path,
+            target_path,
+            result.inserted,
+            result.skipped,
+            len(result.warnings),
+        )
 
     return AugmentationRecord(
         source_sqlite_path=str(source_path),
@@ -382,6 +446,12 @@ def _summarize_existing_augmentation(
         output_path=artifacts.augmented_execution,
         resumed=True,
         skipped_stages=_skipped_stages(config),
+    )
+    LOGGER.info(
+        "Augmentation resume summary databases=%s execution_records=%s output=%s",
+        len(records),
+        len(execution_records),
+        artifacts.augmentation,
     )
     return summarize_augmentation(
         records,

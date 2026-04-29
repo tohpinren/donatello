@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import Counter, defaultdict
 from typing import Any
 
@@ -13,6 +14,8 @@ from sqlmt.counterexamples import read_counterexample_records, summarize_counter
 from sqlmt.execution import read_execution_records, summarize_execution
 from sqlmt.models import ExecutionRecord, ReportSummary
 
+LOGGER = logging.getLogger(__name__)
+
 
 def run_reporting(
     config: ExperimentConfig,
@@ -21,11 +24,25 @@ def run_reporting(
 ) -> ReportSummary:
     """Write Markdown and JSON summaries for available pipeline artifacts."""
 
+    LOGGER.info(
+        "Reporting stage start output=%s json_output=%s",
+        artifacts.report,
+        artifacts.report_json,
+    )
     payload = _build_payload(config, artifacts)
     artifacts.report.write_text(_render_markdown(payload), encoding="utf-8")
     artifacts.report_json.write_text(
         json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
         encoding="utf-8",
+    )
+    LOGGER.info(
+        "Reporting stage complete output=%s json_output=%s sections=%s "
+        "original_score=%s augmented_score=%s",
+        artifacts.report,
+        artifacts.report_json,
+        ",".join(f"{name}:{status}" for name, status in payload["sections"].items()),
+        payload["scores"]["original"],
+        payload["scores"]["augmented"],
     )
     return ReportSummary(
         output_path=str(artifacts.report),
@@ -51,6 +68,14 @@ def _build_payload(
             "available" if artifacts.augmented_execution.exists() else "unavailable"
         ),
     }
+    LOGGER.info(
+        "Reporting artifact availability execution=%s counterexamples=%s "
+        "augmentation=%s augmented_execution=%s",
+        sections["execution"],
+        sections["counterexamples"],
+        sections["augmentation"],
+        sections["augmented_execution"],
+    )
     execution_records = (
         read_execution_records(artifacts.execution)
         if artifacts.execution.exists()
