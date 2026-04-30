@@ -15,6 +15,7 @@ Options:
   --memory <value>        Docker memory limit. Default: 200g
   --image <name>          Runner image name. Default: sqlmt-runner:latest
   --name <name>           Container name. Default: sqlmt-pipeline
+  --force                 Replace an existing pipeline container with the same name
   --help                  Show this message
 
 Example:
@@ -39,6 +40,7 @@ MEMORY_LIMIT="${MEMORY_LIMIT:-200g}"
 CONTAINER_UID="${CONTAINER_UID:-$(id -u)}"
 CONTAINER_GID="${CONTAINER_GID:-$(id -g)}"
 DOCKER_SOCK_GID="${DOCKER_SOCK_GID:-}"
+FORCE_REPLACE="${FORCE_REPLACE:-0}"
 
 EXTRA_SQLMT_ARGS=()
 
@@ -71,6 +73,10 @@ while [[ $# -gt 0 ]]; do
     --name)
       CONTAINER_NAME="$2"
       shift 2
+      ;;
+    --force)
+      FORCE_REPLACE=1
+      shift
       ;;
     --help|-h)
       usage
@@ -116,7 +122,15 @@ if [[ -n "${DOCKER_SOCK_GID}" ]]; then
   docker_group_args+=(--group-add "${DOCKER_SOCK_GID}")
 fi
 
-docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+if docker container inspect "${CONTAINER_NAME}" >/dev/null 2>&1; then
+  if [[ "${FORCE_REPLACE}" != "1" ]]; then
+    echo "Refusing to replace existing container: ${CONTAINER_NAME}" >&2
+    echo "Re-run with --force to replace it explicitly." >&2
+    exit 1
+  fi
+
+  docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+fi
 
 docker run --rm \
   --name "${CONTAINER_NAME}" \

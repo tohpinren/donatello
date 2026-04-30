@@ -142,6 +142,10 @@ scripts/run-pipeline.sh \
   --memory 200g
 ```
 
+If a pipeline container with the chosen name already exists, the helper now
+fails fast instead of replacing it. Re-run with `--force` only when you want
+to stop and replace the existing pipeline container explicitly.
+
 What the runner script does:
 
 - mounts the host BIRD root read-only at `/opt/sqlmt/data/bird`
