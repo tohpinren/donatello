@@ -127,6 +127,10 @@ Start the SQLDriller-compatible VeriEQL sidecar:
 scripts/start-verieql-sidecar.sh
 ```
 
+If a `verieql` or `verieql-mysql` container already exists, the helper now
+fails fast instead of replacing it. Re-run with `--force` only when you want
+to tear down and replace the existing sidecar pair explicitly.
+
 Run the pipeline inside the runner container:
 
 ```bash
@@ -144,6 +148,8 @@ What the runner script does:
 - mounts the host outputs directory read-write at `/opt/sqlmt/outputs`
 - mounts `/var/run/docker.sock` so SQLDriller can exec into the `verieql`
   sidecar
+- runs the container as the calling host UID/GID so mounted outputs stay
+  user-owned on the server
 - runs `uv run sqlmt run --config ...` inside the container with `--init`,
   `--cpus`, and `--memory`
 

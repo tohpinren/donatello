@@ -2,6 +2,17 @@
 # Build and launch the SQLDriller-compatible VeriEQL sidecar plus its companion MySQL container.
 set -euo pipefail
 
+usage() {
+  cat <<'EOF'
+Usage:
+  start-verieql-sidecar.sh [--force]
+
+Options:
+  --force     Replace existing sidecar containers if they already exist
+  --help      Show this message
+EOF
+}
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEFAULT_TOOLS_ROOT="$(cd "${REPO_ROOT}/.." && pwd)/tools"
 
@@ -12,6 +23,29 @@ VERIEQL_CONTAINER_NAME="${VERIEQL_CONTAINER_NAME:-verieql}"
 VERIEQL_MYSQL_CONTAINER_NAME="${VERIEQL_MYSQL_CONTAINER_NAME:-verieql-mysql}"
 VERIEQL_NETWORK="${VERIEQL_NETWORK:-sqlmt-verieql}"
 MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-VeriEQL@2024}"
+FORCE_REPLACE="${FORCE_REPLACE:-0}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --force)
+      FORCE_REPLACE=1
+      shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+container_exists() {
+  docker container inspect "$1" >/dev/null 2>&1
+}
 
 if [[ ! -d "${VERIEQL_SOURCE}" ]]; then
   echo "VeriEQL checkout not found: ${VERIEQL_SOURCE}" >&2
@@ -48,8 +82,24 @@ docker build \
 docker network inspect "${VERIEQL_NETWORK}" >/dev/null 2>&1 \
   || docker network create "${VERIEQL_NETWORK}" >/dev/null
 
-docker rm -f "${VERIEQL_CONTAINER_NAME}" >/dev/null 2>&1 || true
-docker rm -f "${VERIEQL_MYSQL_CONTAINER_NAME}" >/dev/null 2>&1 || true
+existing_containers=()
+if container_exists "${VERIEQL_CONTAINER_NAME}"; then
+  existing_containers+=("${VERIEQL_CONTAINER_NAME}")
+fi
+if container_exists "${VERIEQL_MYSQL_CONTAINER_NAME}"; then
+  existing_containers+=("${VERIEQL_MYSQL_CONTAINER_NAME}")
+fi
+
+if (( ${#existing_containers[@]} > 0 )); then
+  if [[ "${FORCE_REPLACE}" != "1" ]]; then
+    echo "Refusing to replace existing container(s): ${existing_containers[*]}" >&2
+    echo "Re-run with --force to replace them explicitly." >&2
+    exit 1
+  fi
+
+  docker rm -f "${VERIEQL_CONTAINER_NAME}" >/dev/null 2>&1 || true
+  docker rm -f "${VERIEQL_MYSQL_CONTAINER_NAME}" >/dev/null 2>&1 || true
+fi
 
 docker run -d \
   --name "${VERIEQL_MYSQL_CONTAINER_NAME}" \

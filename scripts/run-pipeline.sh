@@ -36,6 +36,9 @@ SQLMT_RUNNER_IMAGE="${SQLMT_RUNNER_IMAGE:-sqlmt-runner:latest}"
 CONTAINER_NAME="${CONTAINER_NAME:-sqlmt-pipeline}"
 CPU_LIMIT="${CPU_LIMIT:-16}"
 MEMORY_LIMIT="${MEMORY_LIMIT:-200g}"
+CONTAINER_UID="${CONTAINER_UID:-$(id -u)}"
+CONTAINER_GID="${CONTAINER_GID:-$(id -g)}"
+DOCKER_SOCK_GID="${DOCKER_SOCK_GID:-}"
 
 EXTRA_SQLMT_ARGS=()
 
@@ -104,17 +107,30 @@ fi
 
 mkdir -p "${OUTPUTS_ROOT_HOST}"
 
+if [[ -z "${DOCKER_SOCK_GID}" && -S /var/run/docker.sock ]]; then
+  DOCKER_SOCK_GID="$(stat -c '%g' /var/run/docker.sock)"
+fi
+
+docker_group_args=()
+if [[ -n "${DOCKER_SOCK_GID}" ]]; then
+  docker_group_args+=(--group-add "${DOCKER_SOCK_GID}")
+fi
+
 docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
 
 docker run --rm \
   --name "${CONTAINER_NAME}" \
   --init \
+  --user "${CONTAINER_UID}:${CONTAINER_GID}" \
+  "${docker_group_args[@]}" \
   --cpus "${CPU_LIMIT}" \
   --memory "${MEMORY_LIMIT}" \
+  -e HOME=/tmp/sqlmt-home \
+  -e XDG_CACHE_HOME=/tmp/sqlmt-xdg-cache \
+  -e UV_CACHE_DIR=/tmp/sqlmt-uv-cache \
   -v "${BIRD_ROOT_HOST}:/opt/sqlmt/data/bird:ro" \
   -v "${OUTPUTS_ROOT_HOST}:/opt/sqlmt/outputs:rw" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -w /opt/sqlmt \
   "${SQLMT_RUNNER_IMAGE}" \
-  uv run sqlmt run --config "${CONFIG_PATH}" "${EXTRA_SQLMT_ARGS[@]}"
-
+  uv run --no-sync sqlmt run --config "${CONFIG_PATH}" "${EXTRA_SQLMT_ARGS[@]}"
