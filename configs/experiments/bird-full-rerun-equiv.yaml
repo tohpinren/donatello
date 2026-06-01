@@ -4,7 +4,7 @@ bird_mode: full
 data_root: ${BIRD_ROOT}
 output_dir: outputs/bird-full
 mutation_profile: canonical
-workers: 32
+workers: 8
 resume: true
 overwrite: false
 

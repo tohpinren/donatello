@@ -141,6 +141,10 @@ That avoids Docker auto-assigning a `192.168.x.x` range that could overlap
 with lab/VPN client routes. You can override the defaults with
 `VERIEQL_NETWORK=...` and `VERIEQL_SUBNET=...` if needed.
 
+If a `verieql` or `verieql-mysql` container already exists, the helper now
+fails fast instead of replacing it. Re-run with `--force` only when you want
+to tear down and replace the existing sidecar pair explicitly.
+
 Run the pipeline inside the runner container:
 
 ```bash
@@ -152,12 +156,18 @@ scripts/run-pipeline.sh \
   --memory 200g
 ```
 
+If a pipeline container with the chosen name already exists, the helper now
+fails fast instead of replacing it. Re-run with `--force` only when you want
+to stop and replace the existing pipeline container explicitly.
+
 What the runner script does:
 
 - mounts the host BIRD root read-only at `/opt/donatello/data/bird`
 - mounts the host outputs directory read-write at `/opt/donatello/outputs`
 - mounts `/var/run/docker.sock` so SQLDriller can exec into the `verieql`
   sidecar
+- runs the container as the calling host UID/GID so mounted outputs stay
+  user-owned on the server
 - runs `uv run donatello run --config ...` inside the container with `--init`,
   `--cpus`, and `--memory`
 

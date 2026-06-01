@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the donatello runner image from the local repo plus sibling VeriEQL/SQLDriller checkouts.
+# Build the Donatello runner image from the local repo plus sibling VeriEQL/SQLDriller checkouts.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the donatello pipeline inside the resource-limited runner container.
+# Run the Donatello pipeline inside the resource-limited runner container.
 set -euo pipefail
 
 usage() {
@@ -15,6 +15,7 @@ Options:
   --memory <value>        Docker memory limit. Default: 200g
   --image <name>          Runner image name. Default: donatello-runner:latest
   --name <name>           Container name. Default: donatello-pipeline
+  --force                 Replace an existing pipeline container with the same name
   --help                  Show this message
 
 Example:
@@ -36,6 +37,10 @@ DONATELLO_RUNNER_IMAGE="${DONATELLO_RUNNER_IMAGE:-donatello-runner:latest}"
 CONTAINER_NAME="${CONTAINER_NAME:-donatello-pipeline}"
 CPU_LIMIT="${CPU_LIMIT:-16}"
 MEMORY_LIMIT="${MEMORY_LIMIT:-200g}"
+CONTAINER_UID="${CONTAINER_UID:-$(id -u)}"
+CONTAINER_GID="${CONTAINER_GID:-$(id -g)}"
+DOCKER_SOCK_GID="${DOCKER_SOCK_GID:-}"
+FORCE_REPLACE="${FORCE_REPLACE:-0}"
 
 EXTRA_DONATELLO_ARGS=()
 
@@ -68,6 +73,10 @@ while [[ $# -gt 0 ]]; do
     --name)
       CONTAINER_NAME="$2"
       shift 2
+      ;;
+    --force)
+      FORCE_REPLACE=1
+      shift
       ;;
     --help|-h)
       usage
@@ -104,16 +113,38 @@ fi
 
 mkdir -p "${OUTPUTS_ROOT_HOST}"
 
-docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+if [[ -z "${DOCKER_SOCK_GID}" && -S /var/run/docker.sock ]]; then
+  DOCKER_SOCK_GID="$(stat -c '%g' /var/run/docker.sock)"
+fi
+
+docker_group_args=()
+if [[ -n "${DOCKER_SOCK_GID}" ]]; then
+  docker_group_args+=(--group-add "${DOCKER_SOCK_GID}")
+fi
+
+if docker container inspect "${CONTAINER_NAME}" >/dev/null 2>&1; then
+  if [[ "${FORCE_REPLACE}" != "1" ]]; then
+    echo "Refusing to replace existing container: ${CONTAINER_NAME}" >&2
+    echo "Re-run with --force to replace it explicitly." >&2
+    exit 1
+  fi
+
+  docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+fi
 
 docker run --rm \
   --name "${CONTAINER_NAME}" \
   --init \
+  --user "${CONTAINER_UID}:${CONTAINER_GID}" \
+  "${docker_group_args[@]}" \
   --cpus "${CPU_LIMIT}" \
   --memory "${MEMORY_LIMIT}" \
+  -e HOME=/tmp/donatello-home \
+  -e XDG_CACHE_HOME=/tmp/donatello-xdg-cache \
+  -e UV_CACHE_DIR=/tmp/donatello-uv-cache \
   -v "${BIRD_ROOT_HOST}:/opt/donatello/data/bird:ro" \
   -v "${OUTPUTS_ROOT_HOST}:/opt/donatello/outputs:rw" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -w /opt/donatello \
   "${DONATELLO_RUNNER_IMAGE}" \
-  uv run donatello run --config "${CONFIG_PATH}" "${EXTRA_DONATELLO_ARGS[@]}"
+  uv run --no-sync donatello run --config "${CONFIG_PATH}" "${EXTRA_DONATELLO_ARGS[@]}"
