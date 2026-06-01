@@ -8,8 +8,10 @@ from pathlib import Path
 
 from evaluate_ce_transfer import (
     evaluate_ce_prediction,
+    format_missing_counterexample_paths,
     load_baseline,
     load_donatello_counterexamples,
+    select_target_models,
     write_csv,
     write_jsonl,
 )
@@ -97,8 +99,10 @@ def main() -> None:
 
     predictions_by_model = load_predictions(supplementary_root / "generated_sqls")
     baseline_by_model = load_baseline(Path(args.baseline_jsonl))
-    target_models = sorted(
-        model for model in predictions_by_model if model != args.exclude_model
+    target_models = select_target_models(
+        predictions_by_model,
+        baseline_by_model,
+        exclude_model=args.exclude_model,
     )
 
     spotit_ces = load_spotit_counterexamples(
@@ -156,6 +160,7 @@ def main() -> None:
 
 def load_spotit_counterexamples(path: Path) -> list[dict[str, object]]:
     ces: list[dict[str, object]] = []
+    missing_paths: list[tuple[str, Path]] = []
     with path.open("r", encoding="utf-8") as handle:
         for line in handle:
             if not line.strip():
@@ -166,8 +171,13 @@ def load_spotit_counterexamples(path: Path) -> list[dict[str, object]]:
             db_path_raw = row.get("counterexample_db_path")
             if not db_path_raw:
                 continue
-            db_path = Path(str(db_path_raw)).resolve()
+            db_path = Path(str(db_path_raw))
+            if not db_path.is_absolute():
+                db_path = (path.parent / db_path).resolve()
+            else:
+                db_path = db_path.resolve()
             if not db_path.exists():
+                missing_paths.append((str(row["ce_id"]), db_path))
                 continue
             ces.append(
                 {
@@ -179,6 +189,14 @@ def load_spotit_counterexamples(path: Path) -> list[dict[str, object]]:
                     "source": "spotit",
                 }
             )
+    if missing_paths:
+        raise ValueError(
+            format_missing_counterexample_paths(
+                "SpotIt+",
+                manifest_path=path,
+                missing_paths=missing_paths,
+            )
+        )
     return ces
 
 

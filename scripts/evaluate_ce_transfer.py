@@ -13,6 +13,8 @@ from evaluate_spotit_on_augmented_bird import (
     load_predictions,
 )
 
+EXPECTED_TARGET_MODEL_COUNT = 9
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -89,8 +91,10 @@ def main() -> None:
         raise ValueError(f"Expected {TOTAL_EXAMPLES} dev examples.")
     predictions_by_model = load_predictions(supplementary_root / "generated_sqls")
     baseline_by_model = load_baseline(Path(args.baseline_jsonl))
-    target_models = sorted(
-        model for model in predictions_by_model if model != args.exclude_model
+    target_models = select_target_models(
+        predictions_by_model,
+        baseline_by_model,
+        exclude_model=args.exclude_model,
     )
 
     ces = load_donatello_counterexamples(
@@ -155,6 +159,48 @@ def load_baseline(path: Path) -> dict[str, dict[int, str]]:
     return results
 
 
+def select_target_models(
+    predictions_by_model: dict[str, dict[int, str]],
+    baseline_by_model: dict[str, dict[int, str]],
+    *,
+    exclude_model: str,
+    expected_target_count: int = EXPECTED_TARGET_MODEL_COUNT,
+) -> list[str]:
+    """Return the 9 transfer targets, failing fast on model-set drift."""
+
+    if exclude_model not in predictions_by_model:
+        available = ", ".join(sorted(predictions_by_model))
+        raise ValueError(
+            f"Excluded source model '{exclude_model}' is not present in predictions. "
+            f"Available models: {available}"
+        )
+    if exclude_model not in baseline_by_model:
+        available = ", ".join(sorted(baseline_by_model))
+        raise ValueError(
+            f"Excluded source model '{exclude_model}' is not present in baseline EX. "
+            f"Available models: {available}"
+        )
+
+    target_models = sorted(
+        model for model in predictions_by_model if model != exclude_model
+    )
+    missing_baseline = [
+        model for model in target_models if model not in baseline_by_model
+    ]
+    if missing_baseline:
+        raise ValueError(
+            "Baseline EX is missing target models: "
+            + ", ".join(sorted(missing_baseline))
+        )
+    if len(target_models) != expected_target_count:
+        raise ValueError(
+            f"Expected {expected_target_count} transfer target models after "
+            f"excluding '{exclude_model}', found {len(target_models)}: "
+            + ", ".join(target_models)
+        )
+    return target_models
+
+
 def load_donatello_counterexamples(
     path: Path,
     *,
@@ -162,6 +208,7 @@ def load_donatello_counterexamples(
     examples_by_id: dict[int, dict],
 ) -> list[dict[str, object]]:
     ces: list[dict[str, object]] = []
+    missing_paths: list[tuple[str, Path]] = []
     with path.open("r", encoding="utf-8") as handle:
         for line in handle:
             if not line.strip():
@@ -177,6 +224,7 @@ def load_donatello_counterexamples(
             if not ce_path.is_absolute():
                 ce_path = (repo_root / ce_path).resolve()
             if not ce_path.exists():
+                missing_paths.append((str(row["mutant_id"]), ce_path))
                 continue
             ces.append(
                 {
@@ -187,7 +235,34 @@ def load_donatello_counterexamples(
                     "gold_sql": str(row["gold_sql"]).strip(),
                 }
             )
+    if missing_paths:
+        raise ValueError(
+            format_missing_counterexample_paths(
+                "Donatello",
+                manifest_path=path,
+                missing_paths=missing_paths,
+            )
+        )
     return ces
+
+
+def format_missing_counterexample_paths(
+    source: str,
+    *,
+    manifest_path: Path,
+    missing_paths: list[tuple[str, Path]],
+) -> str:
+    """Build a compact error message for stale CE manifests."""
+
+    sample = "; ".join(
+        f"{ce_id}: {path}" for ce_id, path in missing_paths[:5]
+    )
+    extra = "" if len(missing_paths) <= 5 else f"; ... +{len(missing_paths) - 5} more"
+    return (
+        f"{source} CE manifest references {len(missing_paths)} missing "
+        f"counterexample DB file(s): {manifest_path}. First missing: "
+        f"{sample}{extra}"
+    )
 
 
 def evaluate_ce_prediction(
