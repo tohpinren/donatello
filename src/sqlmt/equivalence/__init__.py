@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 import tempfile
 import time
@@ -54,6 +55,16 @@ _VERIEQL_TYPE_MAP = {
     "string": "VARCHAR",
 }
 LOGGER = logging.getLogger(__name__)
+
+
+def _verieql_io_path_literal(path: Path) -> str:
+    """Return absolute path strings VeriEQL subprocess ``open()`` can resolve.
+
+    The VeriEQL child runs with ``cwd`` set to the checkout. Forwarding pathlib
+    strings that are relative to sqlmt's cwd must not depend on VeriEQL's tree.
+    Normalizing via :func:`os.path.abspath` matches openat semantics for CLI args."""
+
+    return os.path.abspath(os.path.expanduser(str(path)))
 
 
 def build_verieql_input_rows(
@@ -179,34 +190,41 @@ def run_equivalence_filtering(
     input_rows = build_verieql_input_rows(pending_mutations, examples)
     _ensure_equivalence_artifact(artifacts.equivalence)
 
+    artifact_root = artifacts.root.resolve(strict=False)
     with tempfile.TemporaryDirectory(
-        prefix="verieql-", dir=artifacts.root
+        prefix="verieql-", dir=str(artifact_root)
     ) as temp_dir_name:
-        temp_dir = Path(temp_dir_name)
-        input_path = temp_dir / "input.jsonlines"
-        output_path = temp_dir / "output.out"
-        _write_jsonl(input_path, input_rows)
+        temp_dir = Path(os.path.abspath(temp_dir_name))
+        input_abs = Path(
+            _verieql_io_path_literal(temp_dir / "input.jsonlines")
+        )
+        output_abs = Path(
+            _verieql_io_path_literal(temp_dir / "output.out")
+        )
+        _write_jsonl(input_abs, input_rows)
         command = [
-            str(config.tools.verieql_python),
+            _verieql_io_path_literal(Path(config.tools.verieql_python)),
             "-m",
             "parallel.cli_within_timeout",
             "-f",
-            str(input_path),
+            str(input_abs),
             "-t",
             str(config.timeouts.verieql_seconds),
             "-c",
             str(config.workers),
             "-o",
-            str(output_path),
+            str(output_abs),
         ]
         LOGGER.info(
             "Launching VeriEQL cwd=%s timeout_per_pair=%s workers=%s "
-            "batch_pairs=%s temp_dir=%s",
+            "batch_pairs=%s temp_dir=%s verieql_input=%s verieql_output=%s",
             config.tools.verieql_path,
             config.timeouts.verieql_seconds,
             config.workers,
             len(pending_mutations),
             temp_dir,
+            input_abs,
+            output_abs,
         )
         batch_timeout = _subprocess_timeout(
             config.timeouts.verieql_seconds,
@@ -218,7 +236,7 @@ def run_equivalence_filtering(
                 command=command,
                 cwd=config.tools.verieql_path,
                 batch_timeout=batch_timeout,
-                output_path=output_path,
+                output_path=output_abs,
                 mutations=pending_mutations,
                 timeout_seconds=config.timeouts.verieql_seconds,
                 artifact_path=artifacts.equivalence,
@@ -228,7 +246,7 @@ def run_equivalence_filtering(
                 command=command,
                 cwd=config.tools.verieql_path,
                 batch_timeout=batch_timeout,
-                output_path=output_path,
+                output_path=output_abs,
                 mutations=pending_mutations,
                 timeout_seconds=config.timeouts.verieql_seconds,
                 artifact_path=artifacts.equivalence,

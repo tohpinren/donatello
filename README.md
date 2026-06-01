@@ -74,6 +74,92 @@ uv run sqlmt check-env
 uv run sqlmt check-env --config configs/smoke/bird-dev.yaml
 ```
 
+### Docker Runner
+
+The repository also supports a Dockerized runner for the full pipeline while
+keeping the existing YAML config schema unchanged.
+
+This setup uses:
+
+- one resource-limited runner container for `sql-mutation-testing`
+- one host-managed `verieql` sidecar for SQLDriller stage 6/7 integration
+- bind mounts for benchmark data and `outputs/` so resumable artifacts persist
+- a sidecar filesystem layout that mirrors SQLDriller's hard-coded
+  `/verieql/main.py` exec path
+
+Important current limitation:
+
+- SQLDriller's counterexample path still talks to a Docker container named
+  `verieql` through the host Docker socket
+- stage 6/7 runs therefore require `/var/run/docker.sock` plus the
+  repo-provided sidecar to be started first
+- this Docker flow does **not** change `workers`, `resume`, `output_dir`, or
+  any other YAML fields
+
+The runner image is built from the current local checkouts, not upstream HEAD:
+
+- this repo checkout
+- the sibling `tools/VeriEQL` checkout
+- the sibling `tools/SQLDriller` checkout
+- the helper build scripts stage a temporary Docker build context from those
+  working trees, so they do not require `docker buildx`
+
+By default the helper scripts expect the following local layout:
+
+```text
+../sql-mutation-testing
+../tools/VeriEQL
+../tools/SQLDriller
+```
+
+You can override those source paths with `VERIEQL_SOURCE=...` and
+`SQLDRILLER_SOURCE=...` when building.
+
+Build the runner image:
+
+```bash
+scripts/build-runner-image.sh
+```
+
+Start the SQLDriller-compatible VeriEQL sidecar:
+
+```bash
+scripts/start-verieql-sidecar.sh
+```
+
+If a `verieql` or `verieql-mysql` container already exists, the helper now
+fails fast instead of replacing it. Re-run with `--force` only when you want
+to tear down and replace the existing sidecar pair explicitly.
+
+Run the pipeline inside the runner container:
+
+```bash
+scripts/run-pipeline.sh \
+  --config configs/experiments/bird-full-pipeline.yaml \
+  --bird-root /path/to/bird \
+  --outputs-root /path/to/sql-mutation-testing/outputs \
+  --cpus 16 \
+  --memory 200g
+```
+
+If a pipeline container with the chosen name already exists, the helper now
+fails fast instead of replacing it. Re-run with `--force` only when you want
+to stop and replace the existing pipeline container explicitly.
+
+What the runner script does:
+
+- mounts the host BIRD root read-only at `/opt/sqlmt/data/bird`
+- mounts the host outputs directory read-write at `/opt/sqlmt/outputs`
+- mounts `/var/run/docker.sock` so SQLDriller can exec into the `verieql`
+  sidecar
+- runs the container as the calling host UID/GID so mounted outputs stay
+  user-owned on the server
+- runs `uv run sqlmt run --config ...` inside the container with `--init`,
+  `--cpus`, and `--memory`
+
+Because artifacts are written to the mounted `outputs/` directory,
+`resume: true` continues to be the restart mechanism after container restarts.
+
 ### VeriEQL Setup
 
 VeriEQL is an external solver dependency and is not vendored into this
