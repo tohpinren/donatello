@@ -234,7 +234,7 @@ does not integrate SQLSolver/Java for this stage.
 The repository does **not** ship benchmark data. Point configs to your local
 benchmark root with `data_root` or environment variables such as `BIRD_ROOT`.
 
-### Recommended Local Layout
+### BIRD Layout
 
 ```text
 ~/data/donatello/
@@ -273,6 +273,39 @@ Or set it inline per command:
 BIRD_ROOT=~/data/donatello/bird uv run donatello run --config configs/smoke/bird-dev.yaml
 ```
 
+### Spider 2.0 SQLite Subset Layout
+
+The Spider 2.0 adapter intentionally targets the same 24 SQLite-backed local
+questions used in the paper experiments. It does not normalize the full Spider
+2.0 release. The expected data root is:
+
+```text
+~/data/donatello/spider2/
+  spider2-lite.jsonl
+  gold_sql/
+    local003.sql
+    ...
+  local_sqlite/
+    local-map.jsonl
+    <db_name>.sqlite
+```
+
+`local-map.jsonl` is expected to contain a JSON object mapping
+`instance_id -> db_name`. The adapter keeps only the 24 expected local IDs and
+fails fast if the intersection of metadata, gold SQL, and local SQLite mappings
+does not match that set. Set:
+
+```bash
+export SPIDER2_ROOT=~/data/donatello/spider2
+export DONATELLO_OUTPUT_ROOT=outputs
+```
+
+Then run:
+
+```bash
+uv run donatello run --config configs/experiments/spider2-sqlite24-full.yaml
+```
+
 ## Quick Start
 
 ### 1. Validate a Config
@@ -307,8 +340,22 @@ BIRD_ROOT=~/data/donatello/bird uv run donatello run --config configs/smoke/bird
 BIRD_ROOT=~/data/donatello/bird uv run donatello run --config configs/experiments/bird-full.yaml
 ```
 
-`configs/experiments/bird-full.yaml` currently enables normalization only. For a
-full mutation-generation run, copy that config and set `stages.mutate: true`.
+`configs/experiments/bird-full.yaml` enables normalization only. To run the full
+end-to-end pipeline with VeriEQL, SQLite execution, SQLDriller counterexample
+generation, augmentation, and reporting, use:
+
+```bash
+BIRD_ROOT=~/data/donatello/bird \
+VERIEQL_ROOT=~/tools/VeriEQL \
+VERIEQL_PYTHON=~/venvs/verieql/bin/python \
+SQLDRILLER_ROOT=~/tools/SQLDriller \
+SQLDRILLER_PYTHON=~/venvs/sqldriller/bin/python \
+uv run donatello run --config configs/experiments/bird-full-pipeline.yaml
+```
+
+The additional `bird-full-rerun-*` configs are resume/recovery configs for
+specific stages. They assume upstream artifacts already exist in
+`outputs/bird-full`.
 
 ## Configuration
 
@@ -326,6 +373,19 @@ Main fields:
 - `resume` / `overwrite`: artifact reuse behavior
 - `stages`: enable `normalize`, `mutate`, `equivalence`, `execute`,
   `counterexamples`, `augment`, and `report`
+
+Included configs:
+
+- `configs/smoke/bird-dev.yaml`: normalize BIRD dev only.
+- `configs/smoke/bird-dev-mutate.yaml`: normalize BIRD dev and generate mutants.
+- `configs/smoke/bird-train.yaml`: normalize BIRD train only.
+- `configs/experiments/bird-full.yaml`: normalize BIRD dev+train.
+- `configs/experiments/bird-full-pipeline.yaml`: full BIRD pipeline.
+- `configs/experiments/bird-full-rerun-*.yaml`: stage-specific rerun/resume
+  configs for an existing `outputs/bird-full` artifact directory.
+- `configs/experiments/spider2-sqlite24-full.yaml`: full pipeline on the
+  24-question Spider 2.0 SQLite subset.
+- `configs/templates/local.yaml.example`: template for machine-local configs.
 
 Example local config:
 
@@ -397,7 +457,7 @@ sections as unavailable.
 
 ## Artifacts
 
-Each run writes to its own directory under `outputs/`.
+Each run writes to the configured `output_dir`, commonly under `outputs/`.
 
 Current artifacts:
 
@@ -457,6 +517,52 @@ merged into copied databases.
 - VeriEQL batch checking
 - SQLite execution for retained mutants
 - SQLDriller counterexample generation for retained survivors
+
+## Comparison Utilities
+
+The `scripts/` directory includes standalone utilities used for paper
+comparisons with SpotIT-style prediction artifacts. These scripts are not part
+of the core Donatello pipeline, but they are useful for reproducing model-level
+EX-drop and transfer metrics.
+
+Expected external inputs:
+
+- SpotIT supplementary BIRD metadata under `BIRD_benchmarks/`
+- SpotIT supplementary model predictions under `generated_sqls/`
+- local BIRD dev SQLite databases
+- Donatello `counterexamples.jsonl` and generated CE SQLite files
+- optionally an official SpotIt+ CE manifest for combined standalone transfer
+
+Scripts:
+
+- `scripts/evaluate_spotit_on_augmented_bird.py`: evaluates the same model
+  predictions before and after Donatello benchmark augmentation.
+- `scripts/evaluate_ce_transfer.py`: evaluates Donatello CEs in standalone
+  SpotIT-style transfer mode, excluding the configured source model and
+  requiring exactly 9 target models.
+- `scripts/evaluate_combined_ce_transfer.py`: evaluates the union of official
+  SpotIt+ standalone CEs and Donatello standalone CEs.
+
+The transfer scripts intentionally fail if CE database paths are missing or if
+the model set does not match the expected 10-model setup. This is preferable to
+silently producing undercounted paper metrics.
+
+Typical usage:
+
+```bash
+python scripts/evaluate_spotit_on_augmented_bird.py \
+  --supplementary-root /path/to/spotit-artifacts \
+  --bird-db-root /path/to/bird/dev/dev_databases \
+  --augmentation-manifest outputs/bird-full/augmented_databases/augmentation.jsonl \
+  --output-dir outputs/spotit_donatello_transfer
+
+python scripts/evaluate_ce_transfer.py \
+  --supplementary-root /path/to/spotit-artifacts \
+  --bird-db-root /path/to/bird/dev/dev_databases \
+  --baseline-jsonl outputs/spotit_donatello_transfer/baseline_ex.jsonl \
+  --counterexamples-jsonl outputs/bird-full/counterexamples.jsonl \
+  --output-dir outputs/donatello_ce_transfer
+```
 
 ## Mutation Profile
 

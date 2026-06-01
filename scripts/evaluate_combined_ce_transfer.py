@@ -1,3 +1,5 @@
+"""Evaluate standalone transfer on the union of SpotIt+ and Donatello CEs."""
+
 from __future__ import annotations
 
 import argparse

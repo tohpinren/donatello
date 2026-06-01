@@ -27,3 +27,4 @@ tools:
   verieql_path: ${VERIEQL_ROOT}
   verieql_python: ${VERIEQL_PYTHON}
   sqldriller_path: null
+  sqldriller_python: null

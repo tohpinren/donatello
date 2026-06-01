@@ -1,3 +1,11 @@
+"""Evaluate Donatello counterexamples in standalone SpotIT-style transfer mode.
+
+Each generated counterexample database is treated as a temporary witness DB for
+its original BIRD question. For each target model, a prediction is newly failed
+if it was correct on the original BIRD database but differs from the gold query
+on at least one standalone counterexample DB for that question.
+"""
+
 from __future__ import annotations
 
 import argparse
