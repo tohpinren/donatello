@@ -1,14 +1,12 @@
 # Donatello
 
-Donatello is an open-source research tool for analyzing how well
-Text-to-SQL benchmarks distinguish semantically correct SQL from plausible but
-wrong SQL.
+Donatello is a research framework for testing the discriminative power of
+Text-to-SQL benchmark databases. It generates SQL mutants from gold queries,
+filters semantically equivalent mutants, executes retained mutants on benchmark
+databases, generates counterexample databases for surviving mutants, and merges
+counterexample rows back into copied benchmark databases for reevaluation.
 
-The core idea is simple: a benchmark database is part of the evaluation oracle.
-If a meaningfully different SQL query still returns the same result on the
-benchmark database, the benchmark is not testing that behavior strongly enough.
-
-This repository builds a pipeline around that idea using:
+The framework uses:
 
 - **SQLGlot** for SQL parsing and AST-level mutation
 - **BIRD** as the primary benchmark target
@@ -37,9 +35,8 @@ This repository builds a pipeline around that idea using:
   prior counterexample-based evaluation workflows
 
 Benchmark datasets, model prediction artifacts, SpotIT artifacts, and generated
-outputs are intentionally not committed to this repository. Keep those files in
-local data/output directories and pass their locations through configs or script
-arguments.
+outputs are not committed to this repository. Store them in local data/output
+directories and pass their locations through configs or script arguments.
 
 ## Install
 
@@ -76,8 +73,8 @@ uv run donatello check-env --config configs/smoke/bird-dev.yaml
 
 ### Docker Runner
 
-The repository also supports a Dockerized runner for the full pipeline while
-keeping the existing YAML config schema unchanged.
+The repository includes a Dockerized runner for the full pipeline. The runner
+uses the same YAML config files as local runs.
 
 This setup uses:
 
@@ -87,9 +84,9 @@ This setup uses:
 - a sidecar filesystem layout that mirrors SQLDriller's hard-coded
   `/verieql/main.py` exec path
 
-Docker architecture note:
+Docker architecture:
 
-- SQLDriller's counterexample path still talks to a Docker container named
+- SQLDriller's counterexample path talks to a Docker container named
   `verieql` through the host Docker socket
 - stage 6/7 runs therefore require `/var/run/docker.sock` plus the
   repo-provided sidecar to be started first
@@ -127,19 +124,18 @@ Start the SQLDriller-compatible VeriEQL sidecar:
 scripts/start-verieql-sidecar.sh
 ```
 
-The sidecar helper now creates a fixed Docker subnet by default:
+The sidecar helper creates a fixed Docker subnet by default:
 
 ```text
 donatello-verieql -> 10.50.0.0/24
 ```
 
-That avoids Docker auto-assigning a `192.168.x.x` range that could overlap
-with lab/VPN client routes. You can override the defaults with
+This avoids Docker auto-assigning a `192.168.x.x` range that could overlap
+with lab/VPN client routes. Override the defaults with
 `VERIEQL_NETWORK=...` and `VERIEQL_SUBNET=...` if needed.
 
-If a `verieql` or `verieql-mysql` container already exists, the helper now
-fails fast instead of replacing it. Re-run with `--force` only when you want
-to tear down and replace the existing sidecar pair explicitly.
+If a `verieql` or `verieql-mysql` container already exists, the helper fails
+fast. Re-run with `--force` to tear down and replace the existing sidecar pair.
 
 Run the pipeline inside the runner container:
 
@@ -152,9 +148,8 @@ scripts/run-pipeline.sh \
   --memory 200g
 ```
 
-If a pipeline container with the chosen name already exists, the helper now
-fails fast instead of replacing it. Re-run with `--force` only when you want
-to stop and replace the existing pipeline container explicitly.
+If a pipeline container with the chosen name already exists, the helper fails
+fast. Re-run with `--force` to stop and replace the existing pipeline container.
 
 What the runner script does:
 
@@ -173,8 +168,8 @@ Because artifacts are written to the mounted `outputs/` directory,
 ### VeriEQL Setup
 
 VeriEQL is an external solver dependency and is not vendored into this
-repository. Keep it in its own checkout and Python environment. The paths below
-are examples; use the same environment variables in your experiment config.
+repository. Keep it in its own checkout and Python environment. Use the same
+environment variables in your experiment config.
 
 ```bash
 export VERIEQL_ROOT=~/tools/VeriEQL
@@ -227,7 +222,7 @@ and Java are not required for this stage.
 
 ## Benchmark Data Setup
 
-The repository does **not** ship benchmark data. Point configs to your local
+The repository does not ship benchmark data. Point configs to your local
 benchmark root with `data_root` or environment variables such as `BIRD_ROOT`.
 
 ### BIRD Layout
@@ -285,17 +280,16 @@ paper experiments. The expected data root is:
     <db_name>.sqlite
 ```
 
-`local-map.jsonl` is expected to contain a JSON object mapping
-`instance_id -> db_name`. The adapter keeps only the 24 expected local IDs and
-fails fast if the intersection of metadata, gold SQL, and local SQLite mappings
-does not match that set. Set:
+`local-map.jsonl` must contain a JSON object mapping `instance_id -> db_name`.
+The adapter keeps the 24 expected local IDs and fails if the intersection of
+metadata, gold SQL, and local SQLite mappings does not match that set.
 
 ```bash
 export SPIDER2_ROOT=~/data/donatello/spider2
 export DONATELLO_OUTPUT_ROOT=outputs
 ```
 
-Then run:
+Run:
 
 ```bash
 uv run donatello run --config configs/experiments/spider2-sqlite24-full.yaml
@@ -335,9 +329,8 @@ BIRD_ROOT=~/data/donatello/bird uv run donatello run --config configs/smoke/bird
 BIRD_ROOT=~/data/donatello/bird uv run donatello run --config configs/experiments/bird-full.yaml
 ```
 
-`configs/experiments/bird-full.yaml` enables normalization only. To run the full
-end-to-end pipeline with VeriEQL, SQLite execution, SQLDriller counterexample
-generation, augmentation, and reporting, use:
+`configs/experiments/bird-full.yaml` runs normalization only. Use
+`configs/experiments/bird-full-pipeline.yaml` for the full pipeline:
 
 ```bash
 BIRD_ROOT=~/data/donatello/bird \
@@ -348,9 +341,8 @@ SQLDRILLER_PYTHON=~/venvs/sqldriller/bin/python \
 uv run donatello run --config configs/experiments/bird-full-pipeline.yaml
 ```
 
-The additional `bird-full-rerun-*` configs are resume/recovery configs for
-specific stages. They assume upstream artifacts already exist in
-`outputs/bird-full`.
+The `bird-full-rerun-*` configs resume or rerun specific stages. They require
+upstream artifacts in `outputs/bird-full`.
 
 ## Configuration
 
@@ -421,9 +413,8 @@ as the starting point for machine-specific configs.
 
 ### Running Augmentation and Reporting
 
-Augmentation is intended to run after counterexamples exist. A typical follow-up
-config reuses an existing experiment output directory and enables only the final
-stages:
+Run augmentation after counterexample generation. A typical follow-up config
+reuses an existing experiment output directory and enables the final stages:
 
 ```yaml
 resume: true
@@ -446,9 +437,9 @@ uv run donatello run --config configs/local/<name>.yaml
 ```
 
 `augment` requires `mutants.jsonl`, `equivalence.jsonl`, `execution.jsonl`, and
-`counterexamples.jsonl` to already exist unless those upstream stages are
-enabled in the same run. `report` can run on partial outputs and marks missing
-sections as unavailable.
+`counterexamples.jsonl` unless those upstream stages are enabled in the same
+run. `report` can run on partial outputs and marks missing sections as
+unavailable.
 
 ## Artifacts
 
@@ -515,10 +506,9 @@ merged into copied databases.
 
 ## Comparison Utilities
 
-The `scripts/` directory includes standalone utilities used for paper
-comparisons with SpotIT-style prediction artifacts. These scripts are not part
-of the core Donatello pipeline, but they are useful for reproducing model-level
-EX-drop and transfer metrics.
+The `scripts/` directory contains standalone utilities for paper comparisons
+with SpotIT-style prediction artifacts. They run outside the core Donatello
+pipeline and reproduce model-level EX-drop and transfer metrics.
 
 Expected external inputs:
 
@@ -538,9 +528,8 @@ Scripts:
 - `scripts/evaluate_combined_ce_transfer.py`: evaluates the union of official
   SpotIt+ standalone CEs and Donatello standalone CEs.
 
-The transfer scripts intentionally fail if CE database paths are missing or if
-the model set does not match the expected 10-model setup. This is preferable to
-silently producing undercounted paper metrics.
+The transfer scripts fail if CE database paths are missing or if the model set
+does not match the expected 10-model setup. This prevents undercounted metrics.
 
 Typical usage:
 
