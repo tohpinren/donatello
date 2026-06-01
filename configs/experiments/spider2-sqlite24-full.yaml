@@ -1,0 +1,28 @@
+experiment_name: spider2-sqlite24
+benchmark: spider2
+data_root: ${SPIDER2_ROOT}
+output_dir: ${DONATELLO_OUTPUT_ROOT}/spider2-sqlite24
+mutation_profile: canonical
+workers: 4
+resume: true
+overwrite: false
+
+stages:
+  normalize: true
+  mutate: true
+  equivalence: true
+  execute: true
+  counterexamples: true
+  augment: true
+  report: true
+
+timeouts:
+  verieql_seconds: 120
+  sqlite_seconds: 120
+  sqldriller_seconds: 300
+
+tools:
+  verieql_path: ${VERIEQL_ROOT}
+  verieql_python: ${VERIEQL_PYTHON}
+  sqldriller_path: ${SQLDRILLER_ROOT}
+  sqldriller_python: ${SQLDRILLER_PYTHON}

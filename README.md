@@ -1,6 +1,6 @@
-# SQL Mutation Testing
+# Donatello
 
-SQL Mutation Testing is an open-source research tool for analyzing how well
+Donatello is an open-source research tool for analyzing how well
 Text-to-SQL benchmarks distinguish semantically correct SQL from plausible but
 wrong SQL.
 
@@ -12,7 +12,7 @@ This repository builds a pipeline around that idea using:
 
 - **SQLGlot** for SQL parsing and AST-level mutation
 - **BIRD** as the primary benchmark target
-- **Spider 2.0** as a planned secondary target, focused on the usable SQLite subset
+- **Spider 2.0** for the usable SQLite subset
 - **SQLite** for query execution
 - **VeriEQL** for equivalence filtering
 - **SQLDriller** for counterexample generation
@@ -35,11 +35,15 @@ What works today:
 - resumable artifact-based runs driven by YAML config files
 - `uv`-managed Python environment with Ruff, Ty, and pytest
 
-What is planned next:
+Additional utilities:
 
-- Spider 2.0 SQLite-subset normalization
-- model execution-accuracy comparison after the benchmark quality pipeline is
-  reliable
+- standalone counterexample-transfer evaluation utilities for comparison with
+  prior counterexample-based evaluation workflows
+
+Benchmark datasets, model prediction artifacts, SpotIT artifacts, and generated
+outputs are intentionally not committed to this repository. Keep those files in
+local data/output directories and pass their locations through configs or script
+arguments.
 
 ## Install
 
@@ -53,7 +57,7 @@ What is planned next:
 
 ```bash
 git clone <repo-url>
-cd sql-mutation-testing
+cd donatello
 
 ./scripts/bootstrap.sh
 ./scripts/check_env.sh
@@ -69,10 +73,96 @@ You can also run the setup steps directly:
 
 ```bash
 uv sync
-uv run sqlmt --help
-uv run sqlmt check-env
-uv run sqlmt check-env --config configs/smoke/bird-dev.yaml
+uv run donatello --help
+uv run donatello check-env
+uv run donatello check-env --config configs/smoke/bird-dev.yaml
 ```
+
+### Docker Runner
+
+The repository also supports a Dockerized runner for the full pipeline while
+keeping the existing YAML config schema unchanged.
+
+This setup uses:
+
+- one resource-limited runner container for `donatello`
+- one host-managed `verieql` sidecar for SQLDriller stage 6/7 integration
+- bind mounts for benchmark data and `outputs/` so resumable artifacts persist
+- a sidecar filesystem layout that mirrors SQLDriller's hard-coded
+  `/verieql/main.py` exec path
+
+Important current limitation:
+
+- SQLDriller's counterexample path still talks to a Docker container named
+  `verieql` through the host Docker socket
+- stage 6/7 runs therefore require `/var/run/docker.sock` plus the
+  repo-provided sidecar to be started first
+- this Docker flow does **not** change `workers`, `resume`, `output_dir`, or
+  any other YAML fields
+
+The runner image is built from the current local checkouts, not upstream HEAD:
+
+- this repo checkout
+- the sibling `tools/VeriEQL` checkout
+- the sibling `tools/SQLDriller` checkout
+- the helper build scripts stage a temporary Docker build context from those
+  working trees, so they do not require `docker buildx`
+
+By default the helper scripts expect the following local layout:
+
+```text
+../donatello
+../tools/VeriEQL
+../tools/SQLDriller
+```
+
+You can override those source paths with `VERIEQL_SOURCE=...` and
+`SQLDRILLER_SOURCE=...` when building.
+
+Build the runner image:
+
+```bash
+scripts/build-runner-image.sh
+```
+
+Start the SQLDriller-compatible VeriEQL sidecar:
+
+```bash
+scripts/start-verieql-sidecar.sh
+```
+
+The sidecar helper now creates a fixed Docker subnet by default:
+
+```text
+donatello-verieql -> 10.50.0.0/24
+```
+
+That avoids Docker auto-assigning a `192.168.x.x` range that could overlap
+with lab/VPN client routes. You can override the defaults with
+`VERIEQL_NETWORK=...` and `VERIEQL_SUBNET=...` if needed.
+
+Run the pipeline inside the runner container:
+
+```bash
+scripts/run-pipeline.sh \
+  --config configs/experiments/bird-full-pipeline.yaml \
+  --bird-root /path/to/bird \
+  --outputs-root /path/to/donatello/outputs \
+  --cpus 16 \
+  --memory 200g
+```
+
+What the runner script does:
+
+- mounts the host BIRD root read-only at `/opt/donatello/data/bird`
+- mounts the host outputs directory read-write at `/opt/donatello/outputs`
+- mounts `/var/run/docker.sock` so SQLDriller can exec into the `verieql`
+  sidecar
+- runs `uv run donatello run --config ...` inside the container with `--init`,
+  `--cpus`, and `--memory`
+
+Because artifacts are written to the mounted `outputs/` directory,
+`resume: true` continues to be the restart mechanism after container restarts.
 
 ### VeriEQL Setup
 
@@ -137,7 +227,7 @@ benchmark root with `data_root` or environment variables such as `BIRD_ROOT`.
 ### Recommended Local Layout
 
 ```text
-~/data/sqlmt/
+~/data/donatello/
   bird/
     dev/
       dev.json
@@ -164,13 +254,13 @@ For the current BIRD implementation:
 ### Set `BIRD_ROOT`
 
 ```bash
-export BIRD_ROOT=~/data/sqlmt/bird
+export BIRD_ROOT=~/data/donatello/bird
 ```
 
 Or set it inline per command:
 
 ```bash
-BIRD_ROOT=~/data/sqlmt/bird uv run sqlmt run --config configs/smoke/bird-dev.yaml
+BIRD_ROOT=~/data/donatello/bird uv run donatello run --config configs/smoke/bird-dev.yaml
 ```
 
 ## Quick Start
@@ -178,7 +268,7 @@ BIRD_ROOT=~/data/sqlmt/bird uv run sqlmt run --config configs/smoke/bird-dev.yam
 ### 1. Validate a Config
 
 ```bash
-uv run sqlmt config validate --config configs/smoke/bird-dev.yaml
+uv run donatello config validate --config configs/smoke/bird-dev.yaml
 ```
 
 ### 2. Dry Run
@@ -186,25 +276,25 @@ uv run sqlmt config validate --config configs/smoke/bird-dev.yaml
 Use `--dry-run` to inspect resolved outputs without creating artifacts.
 
 ```bash
-uv run sqlmt run --config configs/smoke/bird-dev.yaml --dry-run
+uv run donatello run --config configs/smoke/bird-dev.yaml --dry-run
 ```
 
 ### 3. Normalize BIRD
 
 ```bash
-BIRD_ROOT=~/data/sqlmt/bird uv run sqlmt run --config configs/smoke/bird-dev.yaml
+BIRD_ROOT=~/data/donatello/bird uv run donatello run --config configs/smoke/bird-dev.yaml
 ```
 
 ### 4. Normalize and Generate Mutants
 
 ```bash
-BIRD_ROOT=~/data/sqlmt/bird uv run sqlmt run --config configs/smoke/bird-dev-mutate.yaml
+BIRD_ROOT=~/data/donatello/bird uv run donatello run --config configs/smoke/bird-dev-mutate.yaml
 ```
 
 ### 5. Full BIRD Normalization
 
 ```bash
-BIRD_ROOT=~/data/sqlmt/bird uv run sqlmt run --config configs/experiments/bird-full.yaml
+BIRD_ROOT=~/data/donatello/bird uv run donatello run --config configs/experiments/bird-full.yaml
 ```
 
 `configs/experiments/bird-full.yaml` currently enables normalization only. For a
@@ -216,7 +306,7 @@ Runs are driven by YAML config files under [`configs/`](configs/).
 
 Main fields:
 
-- `benchmark`: currently `bird`
+- `benchmark`: `bird` or `spider2`
 - `bird_mode`: `dev`, `train`, or `full`
 - `data_root`: benchmark root path
 - `output_dir`: artifact directory for the run
@@ -233,7 +323,7 @@ Example local config:
 experiment_name: local-bird-dev
 benchmark: bird
 bird_mode: dev
-data_root: ~/data/sqlmt/bird
+data_root: ~/data/donatello/bird
 output_dir: outputs/local-bird-dev
 mutation_profile: canonical
 workers: 4
@@ -287,7 +377,7 @@ stages:
 Then run:
 
 ```bash
-uv run sqlmt run --config configs/local/<name>.yaml
+uv run donatello run --config configs/local/<name>.yaml
 ```
 
 `augment` requires `mutants.jsonl`, `equivalence.jsonl`, `execution.jsonl`, and
@@ -373,18 +463,18 @@ Each rule either:
 
 The generator currently keeps at most `3` generated mutants per rule for each
 gold SQL. That default is centralized in
-`src/sqlmt/mutation/generator.py` as
+`src/donatello/mutation/generator.py` as
 `DEFAULT_MAX_GENERATED_MUTANTS_PER_RULE`, and `generate_mutations(...)` also
 accepts `max_generated_per_rule=...` if you want to override it in code.
 
 ## CLI
 
 ```bash
-uv run sqlmt --help
-uv run sqlmt check-env
-uv run sqlmt config validate --config <config.yaml>
-uv run sqlmt run --config <config.yaml>
-uv run sqlmt run --config <config.yaml> --dry-run
+uv run donatello --help
+uv run donatello check-env
+uv run donatello config validate --config <config.yaml>
+uv run donatello run --config <config.yaml>
+uv run donatello run --config <config.yaml> --dry-run
 ```
 
 ## Development

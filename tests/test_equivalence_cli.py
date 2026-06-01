@@ -5,7 +5,7 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from sqlmt.cli import app
+from donatello.cli import app
 from tests.helpers import read_jsonl, write_bird_fixture, write_config
 
 runner = CliRunner()

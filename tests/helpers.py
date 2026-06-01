@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 from typing import Any
 
-from sqlmt.models import NormalizedExample, NormalizedSchema
+from donatello.models import NormalizedExample, NormalizedSchema
 
 
 def write_bird_fixture(root: Path) -> Path:
@@ -63,6 +64,87 @@ def write_bird_fixture(root: Path) -> Path:
             }
         ],
     )
+    return data_root
+
+
+def write_spider2_fixture(root: Path) -> Path:
+    """Create a tiny Spider 2.0 SQLite-subset fixture under ``root``."""
+
+    data_root = root / "spider2"
+    data_root.mkdir(parents=True, exist_ok=True)
+
+    rows = [
+        {
+            "instance_id": "local003",
+            "db": "RetailOps",
+            "question": "Show every customer name.",
+            "external_knowledge": "retail.md",
+        },
+        {
+            "instance_id": "local004",
+            "db": "RetailOps",
+            "question": "Count every order row.",
+            "external_knowledge": None,
+        },
+        {
+            "instance_id": "local008",
+            "db": "MissingGold",
+            "question": "This row should be ignored because the gold SQL is missing.",
+            "external_knowledge": None,
+        },
+    ]
+    with (data_root / "spider2-lite.jsonl").open("w", encoding="utf-8") as file:
+        for row in rows:
+            file.write(json.dumps(row, ensure_ascii=True))
+            file.write("\n")
+
+    gold_dir = data_root / "gold_sql"
+    gold_dir.mkdir(parents=True, exist_ok=True)
+    (gold_dir / "local003.sql").write_text(
+        "SELECT customer_name FROM customers ORDER BY customer_id",
+        encoding="utf-8",
+    )
+    (gold_dir / "local004.sql").write_text(
+        "SELECT COUNT(*) FROM orders",
+        encoding="utf-8",
+    )
+
+    sqlite_dir = data_root / "local_sqlite"
+    sqlite_dir.mkdir(parents=True, exist_ok=True)
+    (sqlite_dir / "local-map.jsonl").write_text(
+        json.dumps(
+            {
+                "local003": "RetailOps",
+                "local004": "RetailOps",
+                "local008": "MissingGold",
+                "local999": "GhostDb",
+            },
+            ensure_ascii=True,
+        ),
+        encoding="utf-8",
+    )
+
+    retail_db = sqlite_dir / "RetailOps.sqlite"
+    connection = sqlite3.connect(retail_db)
+    connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute(
+        "CREATE TABLE customers ("
+        "customer_id INTEGER PRIMARY KEY, "
+        "customer_name TEXT NOT NULL)"
+    )
+    connection.execute(
+        "CREATE TABLE orders ("
+        "order_id INTEGER PRIMARY KEY, "
+        "customer_id INTEGER NOT NULL, "
+        "total REAL, "
+        "FOREIGN KEY(customer_id) REFERENCES customers(customer_id))"
+    )
+    connection.execute("INSERT INTO customers VALUES (1, 'Ada')")
+    connection.execute("INSERT INTO customers VALUES (2, 'Bob')")
+    connection.execute("INSERT INTO orders VALUES (10, 1, 4.5)")
+    connection.commit()
+    connection.close()
+
     return data_root
 
 

@@ -6,19 +6,19 @@ from typing import cast
 
 import pytest
 
-from sqlmt.artifacts import artifacts_for
-from sqlmt.augmentation import read_augmentation_records, run_augmentation
-from sqlmt.counterexamples import write_counterexample_records
-from sqlmt.equivalence import write_equivalence_records
-from sqlmt.execution import read_execution_records, write_execution_records
-from sqlmt.models import (
+from donatello.artifacts import artifacts_for
+from donatello.augmentation import read_augmentation_records, run_augmentation
+from donatello.counterexamples import write_counterexample_records
+from donatello.equivalence import write_equivalence_records
+from donatello.execution import read_execution_records, write_execution_records
+from donatello.models import (
     CounterexampleRecord,
     EquivalenceRecord,
     ExecutionOutcome,
     ExecutionRecord,
     MutationRecord,
 )
-from sqlmt.mutation.generator import write_mutation_records
+from donatello.mutation.generator import write_mutation_records
 
 
 def test_augmentation_merges_counterexample_rows_and_reruns_mutants(
@@ -284,7 +284,7 @@ def _config(
     resume: bool = True,
     overwrite: bool = False,
 ):
-    from sqlmt.config import ExperimentConfig, StageConfig
+    from donatello.config import ExperimentConfig, StageConfig
 
     return ExperimentConfig(
         experiment_name="test",
