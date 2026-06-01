@@ -1,9 +1,7 @@
 """Evaluate released Text-to-SQL predictions on augmented BIRD databases.
 
-This is a paper-comparison utility, not a core Donatello pipeline stage. It
-computes local execution accuracy for SpotIT supplementary model predictions on
-the original BIRD dev databases and on BIRD dev databases augmented by
-Donatello-generated counterexamples.
+Paper-comparison utility for computing local execution accuracy on original
+BIRD dev databases and Donatello-augmented BIRD dev databases.
 """
 
 from __future__ import annotations
