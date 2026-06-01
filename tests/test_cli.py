@@ -5,8 +5,13 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from sqlmt.cli import app
-from tests.helpers import read_jsonl, write_bird_fixture, write_config
+from donatello.cli import app
+from tests.helpers import (
+    read_jsonl,
+    write_bird_fixture,
+    write_config,
+    write_spider2_fixture,
+)
 
 runner = CliRunner()
 
@@ -200,21 +205,35 @@ def test_cli_run_existing_output_requires_resume_or_overwrite(tmp_path: Path) ->
     assert "Normalization outputs already exist" in second.stdout + second.stderr
 
 
-def test_cli_run_rejects_unimplemented_benchmark(tmp_path: Path) -> None:
+def test_cli_run_supports_spider2_benchmark(tmp_path: Path, monkeypatch) -> None:
+    data_root = write_spider2_fixture(tmp_path)
     output_dir = tmp_path / "outputs" / "spider2"
     config_path = write_config(
         tmp_path / "spider2.yaml",
-        data_root=tmp_path / "spider2",
+        data_root=data_root,
         output_dir=output_dir,
         benchmark="spider2",
         bird_mode=None,
     )
+    from donatello.benchmarks import spider2 as spider2_benchmark
+
+    monkeypatch.setattr(
+        spider2_benchmark,
+        "EXPECTED_INSTANCE_IDS",
+        ["local003", "local004"],
+    )
 
     result = runner.invoke(app, ["run", "--config", str(config_path)])
 
-    assert result.exit_code == 2
-    assert "not implemented yet" in result.stdout + result.stderr
-    assert not output_dir.exists()
+    assert result.exit_code == 0
+    assert "Normalized 2 examples across 1 databases for spider2/dev." in result.stdout
+    artifact = output_dir / "normalized_examples.jsonl"
+    assert artifact.exists()
+    rows = read_jsonl(artifact)
+    assert [row["example_id"] for row in rows] == [
+        "spider2:dev:local003",
+        "spider2:dev:local004",
+    ]
 
 
 def test_cli_run_requires_an_implemented_stage(tmp_path: Path) -> None:

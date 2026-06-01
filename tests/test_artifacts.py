@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from sqlmt.artifacts import artifacts_for
+from donatello.artifacts import artifacts_for
 
 
 def test_artifact_layout_paths() -> None:

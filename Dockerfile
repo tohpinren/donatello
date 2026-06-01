@@ -17,8 +17,8 @@ ENV VERIEQL_ROOT=/opt/tools/VeriEQL
 ENV VERIEQL_PYTHON=/opt/venvs/verieql/bin/python
 ENV SQLDRILLER_ROOT=/opt/tools/SQLDriller
 ENV SQLDRILLER_PYTHON=/opt/venvs/sqldriller/bin/python
-ENV BIRD_ROOT=/opt/sqlmt/data/bird
-ENV SQLMT_OUTPUT_ROOT=/opt/sqlmt/outputs
+ENV BIRD_ROOT=/opt/donatello/data/bird
+ENV DONATELLO_OUTPUT_ROOT=/opt/donatello/outputs
 ENV PATH="/opt/venvs/verieql/bin:/opt/venvs/sqldriller/bin:${PATH}"
 
 COPY tools/VeriEQL ${VERIEQL_ROOT}
@@ -45,16 +45,16 @@ RUN python -m venv /opt/venvs/sqldriller \
     && "${SQLDRILLER_PYTHON}" -m pip install --upgrade pip \
     && "${SQLDRILLER_PYTHON}" -m pip install -r "${SQLDRILLER_ROOT}/requirements.txt"
 
-COPY sql-mutation-testing /opt/sqlmt
+COPY donatello /opt/donatello
 
-WORKDIR /opt/sqlmt
+WORKDIR /opt/donatello
 
 RUN cd "${VERIEQL_ROOT}" \
     && "${VERIEQL_PYTHON}" -m test.test_env \
-    && cd /opt/sqlmt \
+    && cd /opt/donatello \
     && uv sync --frozen --no-dev \
-    && uv run sqlmt --help >/dev/null
+    && uv run donatello --help >/dev/null
 
-RUN mkdir -p "${BIRD_ROOT}" "${SQLMT_OUTPUT_ROOT}"
+RUN mkdir -p "${BIRD_ROOT}" "${DONATELLO_OUTPUT_ROOT}"
 
-CMD ["uv", "run", "sqlmt", "--help"]
+CMD ["uv", "run", "donatello", "--help"]

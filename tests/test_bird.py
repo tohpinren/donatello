@@ -6,8 +6,8 @@ from typing import cast
 
 import pytest
 
-from sqlmt.benchmarks import BenchmarkError, normalize_examples
-from sqlmt.config import BirdMode, ExperimentConfig, StageConfig
+from donatello.benchmarks import BenchmarkError, normalize_examples
+from donatello.config import BirdMode, ExperimentConfig, StageConfig
 from tests.helpers import write_bird_fixture
 
 

@@ -9,7 +9,7 @@ resume: true
 overwrite: false
 
 stages:
-  normalize: false
+  normalize: true
   mutate: true
   equivalence: true
   execute: true

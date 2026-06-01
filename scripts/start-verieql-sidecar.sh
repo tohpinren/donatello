@@ -18,10 +18,11 @@ DEFAULT_TOOLS_ROOT="$(cd "${REPO_ROOT}/.." && pwd)/tools"
 
 VERIEQL_SOURCE="${VERIEQL_SOURCE:-${DEFAULT_TOOLS_ROOT}/VeriEQL}"
 SQLDRILLER_SOURCE="${SQLDRILLER_SOURCE:-${DEFAULT_TOOLS_ROOT}/SQLDriller}"
-VERIEQL_SIDECAR_IMAGE="${VERIEQL_SIDECAR_IMAGE:-sqlmt-verieql-sidecar:latest}"
+VERIEQL_SIDECAR_IMAGE="${VERIEQL_SIDECAR_IMAGE:-donatello-verieql-sidecar:latest}"
 VERIEQL_CONTAINER_NAME="${VERIEQL_CONTAINER_NAME:-verieql}"
 VERIEQL_MYSQL_CONTAINER_NAME="${VERIEQL_MYSQL_CONTAINER_NAME:-verieql-mysql}"
-VERIEQL_NETWORK="${VERIEQL_NETWORK:-sqlmt-verieql}"
+VERIEQL_NETWORK="${VERIEQL_NETWORK:-donatello-verieql}"
+VERIEQL_SUBNET="${VERIEQL_SUBNET:-10.50.0.0/24}"
 MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-VeriEQL@2024}"
 FORCE_REPLACE="${FORCE_REPLACE:-0}"
 
@@ -45,6 +46,10 @@ done
 
 container_exists() {
   docker container inspect "$1" >/dev/null 2>&1
+}
+
+network_subnet() {
+  docker network inspect "$1" --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'
 }
 
 if [[ ! -d "${VERIEQL_SOURCE}" ]]; then
@@ -79,8 +84,17 @@ docker build \
   -t "${VERIEQL_SIDECAR_IMAGE}" \
   "${BUILD_CONTEXT}"
 
-docker network inspect "${VERIEQL_NETWORK}" >/dev/null 2>&1 \
-  || docker network create "${VERIEQL_NETWORK}" >/dev/null
+if docker network inspect "${VERIEQL_NETWORK}" >/dev/null 2>&1; then
+  existing_subnet="$(network_subnet "${VERIEQL_NETWORK}")"
+  if [[ "${existing_subnet}" != "${VERIEQL_SUBNET}" ]]; then
+    echo "Network ${VERIEQL_NETWORK} already exists with subnet ${existing_subnet:-<none>}." >&2
+    echo "Expected fixed safe subnet ${VERIEQL_SUBNET}; refusing to reuse it." >&2
+    echo "Choose a different VERIEQL_NETWORK/VERIEQL_SUBNET or remove the network manually." >&2
+    exit 1
+  fi
+else
+  docker network create --subnet "${VERIEQL_SUBNET}" "${VERIEQL_NETWORK}" >/dev/null
+fi
 
 existing_containers=()
 if container_exists "${VERIEQL_CONTAINER_NAME}"; then

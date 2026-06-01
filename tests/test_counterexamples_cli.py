@@ -7,18 +7,18 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from sqlmt.artifacts import artifacts_for
-from sqlmt.cli import app
-from sqlmt.equivalence import write_equivalence_records
-from sqlmt.execution import write_execution_records
-from sqlmt.models import (
+from donatello.artifacts import artifacts_for
+from donatello.cli import app
+from donatello.equivalence import write_equivalence_records
+from donatello.execution import write_execution_records
+from donatello.models import (
     EquivalenceOutcome,
     EquivalenceRecord,
     ExecutionOutcome,
     ExecutionRecord,
     MutationRecord,
 )
-from sqlmt.mutation.generator import write_mutation_records
+from donatello.mutation.generator import write_mutation_records
 from tests.helpers import write_bird_fixture, write_config
 
 runner = CliRunner()
@@ -28,7 +28,7 @@ def test_cli_run_writes_counterexample_output(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    import sqlmt.counterexamples as counterexamples
+    import donatello.counterexamples as counterexamples
 
     data_root = write_bird_fixture(tmp_path)
     output_dir = tmp_path / "outputs" / "bird-dev"
@@ -54,7 +54,7 @@ def test_cli_run_writes_counterexample_output(
         execute=False,
         counterexamples=True,
         resume=False,
-        sqldriller_path=Path("/Users/tohpinren/Repos/SQLDriller"),
+        sqldriller_path=Path("/opt/SQLDriller"),
         sqldriller_python=Path("/tmp/sqldriller-python"),
     )
 
@@ -109,7 +109,7 @@ def test_cli_run_counterexamples_only_requires_existing_execution(
         execute=False,
         counterexamples=True,
         resume=False,
-        sqldriller_path=Path("/Users/tohpinren/Repos/SQLDriller"),
+        sqldriller_path=Path("/opt/SQLDriller"),
         sqldriller_python=Path("/tmp/sqldriller-python"),
     )
 

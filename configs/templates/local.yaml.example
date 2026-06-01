@@ -3,7 +3,7 @@ experiment_name: local-bird-dev
 benchmark: bird
 bird_mode: dev
 data_root: ${BIRD_ROOT}
-output_dir: ${SQLMT_OUTPUT_ROOT}/local-bird-dev
+output_dir: ${DONATELLO_OUTPUT_ROOT}/local-bird-dev
 mutation_profile: canonical
 workers: 4
 resume: true
@@ -27,3 +27,4 @@ tools:
   verieql_path: ${VERIEQL_ROOT}
   verieql_python: ${VERIEQL_PYTHON}
   sqldriller_path: null
+  sqldriller_python: null

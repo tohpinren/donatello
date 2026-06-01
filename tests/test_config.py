@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from sqlmt.config import ConfigError, load_config
+from donatello.config import ConfigError, load_config
 
 
 def test_valid_config_loading() -> None:
@@ -148,7 +148,7 @@ experiment_name: env-path
 benchmark: bird
 bird_mode: dev
 data_root: ${BIRD_ROOT_TEST}
-output_dir: ~/sqlmt-output-test
+output_dir: ~/donatello-output-test
 tools:
   verieql_path: ${BIRD_ROOT_TEST}/VeriEQL
   sqldriller_path: null
@@ -159,5 +159,5 @@ tools:
     config = load_config(path)
 
     assert config.data_root == data_root
-    assert config.output_dir == Path("~/sqlmt-output-test").expanduser()
+    assert config.output_dir == Path("~/donatello-output-test").expanduser()
     assert config.tools.verieql_path == data_root / "VeriEQL"

@@ -5,13 +5,13 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from sqlmt.artifacts import artifacts_for
-from sqlmt.cli import app
-from sqlmt.counterexamples import write_counterexample_records
-from sqlmt.equivalence import write_equivalence_records
-from sqlmt.execution import write_execution_records
-from sqlmt.models import CounterexampleRecord, EquivalenceRecord, ExecutionRecord
-from sqlmt.mutation.generator import write_mutation_records
+from donatello.artifacts import artifacts_for
+from donatello.cli import app
+from donatello.counterexamples import write_counterexample_records
+from donatello.equivalence import write_equivalence_records
+from donatello.execution import write_execution_records
+from donatello.models import CounterexampleRecord, EquivalenceRecord, ExecutionRecord
+from donatello.mutation.generator import write_mutation_records
 from tests.helpers import write_bird_fixture, write_config
 from tests.test_augmentation import _mutation
 

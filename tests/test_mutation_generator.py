@@ -6,9 +6,9 @@ from collections.abc import Callable
 import pytest
 from sqlglot import parse_one
 
-from sqlmt.models import NormalizedSchema
-from sqlmt.mutation.generator import generate_mutations
-from sqlmt.mutation.profile import (
+from donatello.models import NormalizedSchema
+from donatello.mutation.generator import generate_mutations
+from donatello.mutation.profile import (
     MutationCandidate,
     MutationRule,
     canonical_rules,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from sqlmt.models import MutationRecord
-from sqlmt.mutation.profile import CANONICAL_RULE_IDS, canonical_rules
+from donatello.models import MutationRecord
+from donatello.mutation.profile import CANONICAL_RULE_IDS, canonical_rules
 
 
 def test_canonical_profile_contains_all_rules_in_order() -> None:

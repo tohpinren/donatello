@@ -6,17 +6,17 @@ from typing import cast
 
 import pytest
 
-from sqlmt.artifacts import artifacts_for
-from sqlmt.augmentation import write_augmentation_records
-from sqlmt.counterexamples import write_counterexample_records
-from sqlmt.execution import write_execution_records
-from sqlmt.models import (
+from donatello.artifacts import artifacts_for
+from donatello.augmentation import write_augmentation_records
+from donatello.counterexamples import write_counterexample_records
+from donatello.execution import write_execution_records
+from donatello.models import (
     AugmentationRecord,
     CounterexampleRecord,
     ExecutionOutcome,
     ExecutionRecord,
 )
-from sqlmt.reporting import run_reporting
+from donatello.reporting import run_reporting
 
 
 def test_reporting_writes_markdown_and_json_summary(tmp_path: Path) -> None:
@@ -63,7 +63,7 @@ def test_reporting_writes_markdown_and_json_summary(tmp_path: Path) -> None:
     assert summary.output_path == str(artifacts.report)
     assert summary.json_output_path == str(artifacts.report_json)
     report_text = artifacts.report.read_text(encoding="utf-8")
-    assert "# SQL Mutation Testing Report" in report_text
+    assert "# Donatello Report" in report_text
     assert "Original mutation score: 0.5000" in report_text
     assert "Augmented mutation score: 1.0000" in report_text
     assert "Score delta: 0.5000" in report_text
@@ -122,7 +122,7 @@ def test_reporting_existing_outputs_require_resume_or_overwrite(
     )
 
     assert summary.resumed is False
-    assert "# SQL Mutation Testing Report" in artifacts.report.read_text(
+    assert "# Donatello Report" in artifacts.report.read_text(
         encoding="utf-8"
     )
 
@@ -161,7 +161,7 @@ def _config(
     resume: bool = True,
     overwrite: bool = False,
 ):
-    from sqlmt.config import ExperimentConfig, StageConfig
+    from donatello.config import ExperimentConfig, StageConfig
 
     return ExperimentConfig(
         experiment_name="test",

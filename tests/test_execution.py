@@ -8,22 +8,22 @@ from typing import Any
 
 import pytest
 
-import sqlmt.execution as execution
-from sqlmt.artifacts import artifacts_for
-from sqlmt.config import ExperimentConfig, StageConfig, TimeoutConfig
-from sqlmt.equivalence import write_equivalence_records
-from sqlmt.execution import (
+import donatello.execution as execution
+from donatello.artifacts import artifacts_for
+from donatello.config import ExperimentConfig, StageConfig, TimeoutConfig
+from donatello.equivalence import write_equivalence_records
+from donatello.execution import (
     read_execution_records,
     run_sqlite_execution,
     write_execution_records,
 )
-from sqlmt.models import (
+from donatello.models import (
     EquivalenceOutcome,
     EquivalenceRecord,
     ExecutionRecord,
     MutationRecord,
 )
-from sqlmt.mutation.generator import write_mutation_records
+from donatello.mutation.generator import write_mutation_records
 
 
 def test_sqlite_execution_runs_only_proven_non_equivalent_mutants(
@@ -118,6 +118,38 @@ def test_sqlite_execution_classifies_outcomes_and_scores(
     assert rows["gold_error"].error_phase == "gold"
 
 
+def test_sqlite_execution_remaps_stale_sqlite_paths_via_data_root(
+    tmp_path: Path,
+) -> None:
+    actual_db_path = _write_company_db(tmp_path / "bird" / "company.sqlite")
+    stale_db_path = tmp_path / "old-host" / "company.sqlite"
+    artifacts = artifacts_for(tmp_path / "outputs")
+    artifacts.ensure_base_dirs()
+    write_mutation_records(
+        artifacts.mutants,
+        [
+            _mutation(
+                "remapped",
+                db_path=stale_db_path,
+                mutant_sql="SELECT name FROM employees WHERE id = 1 ORDER BY id",
+            )
+        ],
+    )
+    write_equivalence_records(
+        artifacts.equivalence,
+        [_equivalence("remapped", "proven_non_equivalent")],
+    )
+
+    summary = run_sqlite_execution(_config(tmp_path), artifacts=artifacts)
+
+    assert actual_db_path.exists()
+    assert summary.executed_count == 1
+    assert summary.killed_count == 1
+    rows = read_execution_records(artifacts.execution)
+    assert [row.mutant_id for row in rows] == ["remapped"]
+    assert rows[0].outcome == "killed"
+
+
 def test_sqlite_execution_times_out_long_running_query(tmp_path: Path) -> None:
     db_path = _write_company_db(tmp_path / "company.sqlite")
     artifacts = artifacts_for(tmp_path / "outputs")
@@ -154,6 +186,48 @@ def test_sqlite_execution_times_out_long_running_query(tmp_path: Path) -> None:
     assert rows[0].outcome == "timeout"
     assert rows[0].error_phase == "mutant"
     assert "timed out" in (rows[0].error or "")
+
+
+def test_execute_sql_opens_read_only_db_with_immutable_uri(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "company.sqlite"
+    db_path.write_text("sqlite", encoding="utf-8")
+    seen: dict[str, object] = {}
+
+    class _FakeCursor:
+        def fetchall(self) -> list[tuple[int]]:
+            return [(1,)]
+
+    class _FakeConnection:
+        def set_progress_handler(self, handler: object, steps: int) -> None:
+            seen["progress_handler"] = (handler is not None, steps)
+
+        def execute(self, sql: str) -> _FakeCursor:
+            seen["sql"] = sql
+            return _FakeCursor()
+
+        def close(self) -> None:
+            seen["closed"] = True
+
+    def fake_connect(target: str, *, uri: bool) -> _FakeConnection:
+        seen["target"] = target
+        seen["uri"] = uri
+        return _FakeConnection()
+
+    monkeypatch.setattr(execution.sqlite3, "connect", fake_connect)
+
+    rows = execution._execute_sql(
+        db_path,
+        "SELECT 1",
+        timeout_seconds=120,
+    )
+
+    assert rows == [(1,)]
+    assert seen["uri"] is True
+    assert seen["target"] == f"file:{db_path}?mode=ro&immutable=1"
+    assert seen["closed"] is True
 
 
 def test_sqlite_execution_reuses_cached_gold_failure(

@@ -7,16 +7,16 @@ from typing import Any, cast
 
 import pytest
 
-from sqlmt.artifacts import artifacts_for
-from sqlmt.config import ExperimentConfig, StageConfig, TimeoutConfig, ToolConfig
-from sqlmt.equivalence import (
+from donatello.artifacts import artifacts_for
+from donatello.config import ExperimentConfig, StageConfig, TimeoutConfig, ToolConfig
+from donatello.equivalence import (
     build_verieql_input_rows,
     read_equivalence_records,
     run_equivalence_filtering,
     write_equivalence_records,
 )
-from sqlmt.models import EquivalenceRecord, MutationRecord, MutationStatus
-from sqlmt.mutation.generator import write_mutation_records
+from donatello.models import EquivalenceRecord, MutationRecord, MutationStatus
+from donatello.mutation.generator import write_mutation_records
 from tests.helpers import (
     make_normalized_example,
     read_jsonl,
@@ -139,7 +139,7 @@ def test_equivalence_verieql_paths_absolute_when_output_dir_relative_to_cwd(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """VeriEQL runs with cwd=/path/VeriEQL; -f/-o must be absolute if output_dir is relative."""
+    """VeriEQL -f/-o paths must be absolute when output_dir is relative."""
 
     monkeypatch.chdir(tmp_path)
     artifacts = artifacts_for(Path("outputs"))

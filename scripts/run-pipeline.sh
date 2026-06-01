@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# Run the sqlmt pipeline inside the resource-limited runner container.
+# Run the Donatello pipeline inside the resource-limited runner container.
 set -euo pipefail
 
 usage() {
   cat <<'EOF'
 Usage:
-  run-pipeline.sh --config <config> --bird-root <host_bird_root> [options] [-- <extra sqlmt args>]
+  run-pipeline.sh --config <config> --bird-root <host_bird_root> [options] [-- <extra donatello args>]
 
 Options:
   --config <path>         Config path inside the repo. Default: configs/experiments/bird-full-pipeline.yaml
-  --bird-root <path>      Host BIRD root to mount read-only into /opt/sqlmt/data/bird
-  --outputs-root <path>   Host outputs root to mount read-write into /opt/sqlmt/outputs
+  --bird-root <path>      Host BIRD root to mount read-only into /opt/donatello/data/bird
+  --outputs-root <path>   Host outputs root to mount read-write into /opt/donatello/outputs
   --cpus <value>          Docker CPU limit. Default: 16
   --memory <value>        Docker memory limit. Default: 200g
-  --image <name>          Runner image name. Default: sqlmt-runner:latest
-  --name <name>           Container name. Default: sqlmt-pipeline
+  --image <name>          Runner image name. Default: donatello-runner:latest
+  --name <name>           Container name. Default: donatello-pipeline
   --force                 Replace an existing pipeline container with the same name
   --help                  Show this message
 
@@ -22,7 +22,7 @@ Example:
   scripts/run-pipeline.sh \
     --config configs/experiments/bird-full-pipeline.yaml \
     --bird-root /mnt/data/bird \
-    --outputs-root /home/pinren/sql-mutation-testing/outputs \
+    --outputs-root /path/to/donatello/outputs \
     --cpus 16 \
     --memory 200g
 EOF
@@ -33,8 +33,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_PATH="configs/experiments/bird-full-pipeline.yaml"
 BIRD_ROOT_HOST=""
 OUTPUTS_ROOT_HOST="${REPO_ROOT}/outputs"
-SQLMT_RUNNER_IMAGE="${SQLMT_RUNNER_IMAGE:-sqlmt-runner:latest}"
-CONTAINER_NAME="${CONTAINER_NAME:-sqlmt-pipeline}"
+DONATELLO_RUNNER_IMAGE="${DONATELLO_RUNNER_IMAGE:-donatello-runner:latest}"
+CONTAINER_NAME="${CONTAINER_NAME:-donatello-pipeline}"
 CPU_LIMIT="${CPU_LIMIT:-16}"
 MEMORY_LIMIT="${MEMORY_LIMIT:-200g}"
 CONTAINER_UID="${CONTAINER_UID:-$(id -u)}"
@@ -42,7 +42,7 @@ CONTAINER_GID="${CONTAINER_GID:-$(id -g)}"
 DOCKER_SOCK_GID="${DOCKER_SOCK_GID:-}"
 FORCE_REPLACE="${FORCE_REPLACE:-0}"
 
-EXTRA_SQLMT_ARGS=()
+EXTRA_DONATELLO_ARGS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -67,7 +67,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --image)
-      SQLMT_RUNNER_IMAGE="$2"
+      DONATELLO_RUNNER_IMAGE="$2"
       shift 2
       ;;
     --name)
@@ -84,7 +84,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --)
       shift
-      EXTRA_SQLMT_ARGS=("$@")
+      EXTRA_DONATELLO_ARGS=("$@")
       break
       ;;
     *)
@@ -139,12 +139,12 @@ docker run --rm \
   "${docker_group_args[@]}" \
   --cpus "${CPU_LIMIT}" \
   --memory "${MEMORY_LIMIT}" \
-  -e HOME=/tmp/sqlmt-home \
-  -e XDG_CACHE_HOME=/tmp/sqlmt-xdg-cache \
-  -e UV_CACHE_DIR=/tmp/sqlmt-uv-cache \
-  -v "${BIRD_ROOT_HOST}:/opt/sqlmt/data/bird:ro" \
-  -v "${OUTPUTS_ROOT_HOST}:/opt/sqlmt/outputs:rw" \
+  -e HOME=/tmp/donatello-home \
+  -e XDG_CACHE_HOME=/tmp/donatello-xdg-cache \
+  -e UV_CACHE_DIR=/tmp/donatello-uv-cache \
+  -v "${BIRD_ROOT_HOST}:/opt/donatello/data/bird:ro" \
+  -v "${OUTPUTS_ROOT_HOST}:/opt/donatello/outputs:rw" \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -w /opt/sqlmt \
-  "${SQLMT_RUNNER_IMAGE}" \
-  uv run --no-sync sqlmt run --config "${CONFIG_PATH}" "${EXTRA_SQLMT_ARGS[@]}"
+  -w /opt/donatello \
+  "${DONATELLO_RUNNER_IMAGE}" \
+  uv run --no-sync donatello run --config "${CONFIG_PATH}" "${EXTRA_DONATELLO_ARGS[@]}"
