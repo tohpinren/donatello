@@ -17,26 +17,22 @@ This repository builds a pipeline around that idea using:
 - **VeriEQL** for equivalence filtering
 - **SQLDriller** for counterexample generation
 
-## Current Scope
-
-What works today:
+## Framework Capabilities
 
 - BIRD benchmark normalization for `dev`, `train`, and `full`
+- Spider 2.0 normalization for the paper's SQLite-backed 24-question subset
 - canonical mutation generation with all 19 mutation rules
 - VeriEQL equivalence filtering with explicit proven equivalent, proven
   non-equivalent, timeout, unsupported, and error outcomes
 - SQLite execution for retained proven non-equivalent mutants, with killed,
   survived, timeout, error, and mutation-score outputs
 - SQLDriller counterexample generation for survived proven non-equivalent
-  mutants, using SQLDriller `exec` mode only
+  mutants, using SQLDriller `exec` mode
 - database augmentation from generated SQLDriller counterexamples, with
   conservative row merging into copied SQLite databases and augmented reruns
 - Markdown and JSON reports for before/after mutation-score summaries
 - resumable artifact-based runs driven by YAML config files
 - `uv`-managed Python environment with Ruff, Ty, and pytest
-
-Additional utilities:
-
 - standalone counterexample-transfer evaluation utilities for comparison with
   prior counterexample-based evaluation workflows
 
@@ -91,7 +87,7 @@ This setup uses:
 - a sidecar filesystem layout that mirrors SQLDriller's hard-coded
   `/verieql/main.py` exec path
 
-Important current limitation:
+Docker architecture note:
 
 - SQLDriller's counterexample path still talks to a Docker container named
   `verieql` through the host Docker socket
@@ -100,7 +96,7 @@ Important current limitation:
 - this Docker flow does **not** change `workers`, `resume`, `output_dir`, or
   any other YAML fields
 
-The runner image is built from the current local checkouts, not upstream HEAD:
+The runner image is built from local checkouts, not upstream HEAD:
 
 - this repo checkout
 - the sibling `tools/VeriEQL` checkout
@@ -226,8 +222,8 @@ python3.11 -m venv "$(dirname "$SQLDRILLER_PYTHON")/.."
 "$SQLDRILLER_PYTHON" -m pip install -r "$SQLDRILLER_ROOT/requirements.txt"
 ```
 
-Stage 6 uses SQLDriller `exec` mode only through a thin repo-owned adapter. It
-does not integrate SQLSolver/Java for this stage.
+Stage 6 uses SQLDriller `exec` mode through a thin repo-owned adapter. SQLSolver
+and Java are not required for this stage.
 
 ## Benchmark Data Setup
 
@@ -255,7 +251,7 @@ benchmark root with `data_root` or environment variables such as `BIRD_ROOT`.
           database_description/
 ```
 
-For the current BIRD implementation:
+Supported BIRD splits:
 
 - `dev`: 1534 questions across 11 SQLite databases
 - `train`: 9428 questions across 69 SQLite databases
@@ -275,9 +271,8 @@ BIRD_ROOT=~/data/donatello/bird uv run donatello run --config configs/smoke/bird
 
 ### Spider 2.0 SQLite Subset Layout
 
-The Spider 2.0 adapter intentionally targets the same 24 SQLite-backed local
-questions used in the paper experiments. It does not normalize the full Spider
-2.0 release. The expected data root is:
+The Spider 2.0 adapter targets the 24 SQLite-backed local questions used in the
+paper experiments. The expected data root is:
 
 ```text
 ~/data/donatello/spider2/
@@ -367,7 +362,7 @@ Main fields:
 - `bird_mode`: `dev`, `train`, or `full`
 - `data_root`: benchmark root path
 - `output_dir`: artifact directory for the run
-- `mutation_profile`: currently `canonical`
+- `mutation_profile`: `canonical`
 - `workers`: concurrency used by VeriEQL, SQLite execution, and SQLDriller
   counterexample generation
 - `resume` / `overwrite`: artifact reuse behavior
@@ -459,7 +454,7 @@ sections as unavailable.
 
 Each run writes to the configured `output_dir`, commonly under `outputs/`.
 
-Current artifacts:
+Artifact layout:
 
 ```text
 outputs/
@@ -479,7 +474,7 @@ outputs/
     report.json
 ```
 
-Current stage behavior:
+Stage behavior:
 
 - normalization writes `normalized_examples.jsonl`
 - mutation generation reads `normalized_examples.jsonl` and writes `mutants.jsonl`
@@ -490,7 +485,7 @@ Current stage behavior:
   and writes `execution.jsonl`
 - counterexample generation reads `mutants.jsonl`, `equivalence.jsonl`, and
   `execution.jsonl`, runs only `survived` plus `proven_non_equivalent` mutants,
-  uses SQLDriller `exec` mode only, writes `counterexamples.jsonl`, and stores
+  uses SQLDriller `exec` mode, writes `counterexamples.jsonl`, and stores
   minimized SQLite files under `counterexamples/`
 - augmentation reads `mutants.jsonl`, `equivalence.jsonl`, `execution.jsonl`,
   and `counterexamples.jsonl`, copies original SQLite databases into
@@ -512,7 +507,7 @@ Execution timeouts and errors are reported separately and excluded from the scor
 Augmented execution uses the same formula after counterexample rows have been
 merged into copied databases.
 
-`workers` currently applies to:
+`workers` applies to:
 
 - VeriEQL batch checking
 - SQLite execution for retained mutants
@@ -566,7 +561,7 @@ python scripts/evaluate_ce_transfer.py \
 
 ## Mutation Profile
 
-The current implementation ships one canonical mutation profile with 19 rules:
+Donatello ships one canonical mutation profile with 19 rules:
 
 - Set A: `a_null_pred`, `a_topk_ties`, `a_agg_edge`, `a_pred_loc`, `a_subq_corr_drop`
 - Set B: `b_join_miss`, `b_from_unused_tv`, `b_subq_scope_typo`, `b_like_nowildcard`, `b_wildcard_wrong_op`, `b_domain_mismatch_comp`
@@ -577,7 +572,7 @@ Each rule either:
 - emits one or more SQLGlot-validated mutants, or
 - records a clean skip reason such as `rule_not_applicable`, `duplicate_sql`, or `same_as_gold`
 
-The generator currently keeps at most `3` generated mutants per rule for each
+The generator keeps at most `3` generated mutants per rule for each
 gold SQL. That default is centralized in
 `src/donatello/mutation/generator.py` as
 `DEFAULT_MAX_GENERATED_MUTANTS_PER_RULE`, and `generate_mutations(...)` also
