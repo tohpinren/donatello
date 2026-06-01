@@ -21,4 +21,8 @@ def resolve_sqlite_path(
     candidate = Path(sqlite_path)
     if candidate.exists() or not sqlite_relpath:
         return candidate
-    return data_root / sqlite_relpath
+
+    relpath = Path(sqlite_relpath)
+    if relpath.is_absolute() or ".." in relpath.parts:
+        return candidate
+    return data_root / relpath
