@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal, cast
 
+from donatello.result_comparison import ResultSemantics
+
 
 @dataclass(frozen=True)
 class NormalizedSchema:
@@ -313,6 +315,7 @@ class ExecutionRecord:
     sqlite_path: str
     rule: str
     profile: str
+    result_semantics: ResultSemantics | None = None
     gold_row_count: int | None = None
     mutant_row_count: int | None = None
     gold_sample: list[list[Any]] = field(default_factory=list)
@@ -333,6 +336,7 @@ class ExecutionRecord:
             "sqlite_path": self.sqlite_path,
             "rule": self.rule,
             "profile": self.profile,
+            "result_semantics": self.result_semantics,
             "gold_row_count": self.gold_row_count,
             "mutant_row_count": self.mutant_row_count,
             "gold_sample": self.gold_sample,
@@ -355,6 +359,11 @@ class ExecutionRecord:
             sqlite_path=str(row["sqlite_path"]),
             rule=str(row["rule"]),
             profile=str(row["profile"]),
+            result_semantics=(
+                cast(ResultSemantics, row["result_semantics"])
+                if row.get("result_semantics") is not None
+                else None
+            ),
             gold_row_count=(
                 int(row["gold_row_count"])
                 if row.get("gold_row_count") is not None

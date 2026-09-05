@@ -67,10 +67,14 @@ def test_reporting_writes_markdown_and_json_summary(tmp_path: Path) -> None:
     assert "Original mutation score: 0.5000" in report_text
     assert "Augmented mutation score: 1.0000" in report_text
     assert "Score delta: 0.5000" in report_text
+    assert "Semantics: bag" in report_text
+    assert "Duplicates: multiplicity_preserved" in report_text
+    assert "Row order: ignored" in report_text
     payload = json.loads(artifacts.report_json.read_text(encoding="utf-8"))
     assert payload["scores"]["original"] == 0.5
     assert payload["scores"]["augmented"] == 1.0
     assert payload["scores"]["delta"] == 0.5
+    assert payload["result_comparison"]["configured_semantics"] == "bag"
     assert payload["per_rule"]["c_multi_dist"]["original"]["survived"] == 1
     assert payload["per_rule"]["c_multi_dist"]["augmented"]["killed"] == 1
 
@@ -122,9 +126,7 @@ def test_reporting_existing_outputs_require_resume_or_overwrite(
     )
 
     assert summary.resumed is False
-    assert "# Donatello Report" in artifacts.report.read_text(
-        encoding="utf-8"
-    )
+    assert "# Donatello Report" in artifacts.report.read_text(encoding="utf-8")
 
 
 def _execution(mutant_id: str, outcome: str, rule: str) -> ExecutionRecord:

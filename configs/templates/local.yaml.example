@@ -5,6 +5,7 @@ bird_mode: dev
 data_root: ${BIRD_ROOT}
 output_dir: ${DONATELLO_OUTPUT_ROOT}/local-bird-dev
 mutation_profile: canonical
+result_semantics: bag
 workers: 4
 resume: true
 overwrite: false

@@ -9,6 +9,8 @@ from typing import Any, Literal, cast
 
 import yaml
 
+from donatello.result_comparison import ResultSemantics
+
 Benchmark = Literal["bird", "spider2"]
 BirdMode = Literal["dev", "train", "full"]
 MutationProfile = Literal["canonical"]
@@ -16,6 +18,7 @@ MutationProfile = Literal["canonical"]
 BENCHMARKS = {"bird", "spider2"}
 BIRD_MODES = {"dev", "train", "full"}
 MUTATION_PROFILES = {"canonical"}
+RESULT_SEMANTICS = {"bag", "set"}
 STAGE_FIELDS = (
     "normalize",
     "mutate",
@@ -78,6 +81,7 @@ class ExperimentConfig:
     data_root: Path
     output_dir: Path
     mutation_profile: MutationProfile = "canonical"
+    result_semantics: ResultSemantics = "bag"
     workers: int = 1
     resume: bool = True
     overwrite: bool = False
@@ -104,6 +108,10 @@ def load_config(path: Path | str) -> ExperimentConfig:
         mutation_profile=cast(
             MutationProfile,
             _choice(raw, "mutation_profile", MUTATION_PROFILES, "canonical"),
+        ),
+        result_semantics=cast(
+            ResultSemantics,
+            _choice(raw, "result_semantics", RESULT_SEMANTICS, "bag"),
         ),
         workers=_int(raw, "workers", 1),
         resume=_bool(raw, "resume", True),

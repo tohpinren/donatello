@@ -23,7 +23,8 @@ The framework uses:
 - VeriEQL equivalence filtering with explicit proven equivalent, proven
   non-equivalent, timeout, unsupported, and error outcomes
 - SQLite execution for retained proven non-equivalent mutants, with killed,
-  survived, timeout, error, and mutation-score outputs
+  survived, timeout, error, and mutation-score outputs under explicit bag or
+  set result semantics
 - SQLDriller counterexample generation for survived proven non-equivalent
   mutants, using SQLDriller `exec` mode
 - database augmentation from generated SQLDriller counterexamples, with
@@ -344,6 +345,46 @@ uv run donatello run --config configs/experiments/bird-full-pipeline.yaml
 The `bird-full-rerun-*` configs resume or rerun specific stages. They require
 upstream artifacts in `outputs/bird-full`.
 
+### Equivalence and execution semantics
+
+VeriEQL outcomes are not collapsed into a boolean. Donatello maps `EQU` to
+`proven_equivalent`, `NEQ` to `proven_non_equivalent`, `TMO` to `timeout`, and
+`NSE`/`NIE` to `unsupported`; syntax, unknown, out-of-memory, malformed, and
+other failures are `error`. Only `proven_non_equivalent` mutants proceed to
+SQLite execution and counterexample generation. All other outcomes reduce
+coverage and are excluded from killed/survived counts.
+
+Mutation execution uses `result_semantics: bag` by default. Bag comparison is
+order-insensitive and preserves duplicate multiplicity: for example,
+`[(x), (x)]` differs from `[(x)]`. The `set` sensitivity mode is also
+order-insensitive but discards duplicate multiplicity. The selected policy is
+stored on every execution record; Donatello refuses to resume an older or
+different-semantics execution artifact to avoid mixing policies.
+
+Run the paper-blocker audit under the primary bag semantics, then reuse its
+normalization, mutation, and equivalence artifacts for the set sensitivity:
+
+```bash
+BIRD_ROOT=/path/to/bird \
+VERIEQL_ROOT=/path/to/VeriEQL \
+VERIEQL_PYTHON=/path/to/verieql/bin/python \
+uv run donatello run \
+  --config configs/experiments/bird-full-blocker-audit.yaml
+
+scripts/prepare-set-sensitivity.sh
+
+BIRD_ROOT=/path/to/bird uv run donatello run \
+  --config configs/experiments/bird-full-set-sensitivity.yaml
+```
+
+For an unattended sequential run, export the same three environment variables
+and launch:
+
+```bash
+nohup scripts/run-paper-blocker-audit.sh \
+  > outputs/paper-blocker-audit.nohup.log 2>&1 &
+```
+
 ## Configuration
 
 Runs are driven by YAML config files under [`configs/`](configs/).
@@ -355,6 +396,8 @@ Main fields:
 - `data_root`: benchmark root path
 - `output_dir`: artifact directory for the run
 - `mutation_profile`: `canonical`
+- `result_semantics`: `bag` (duplicates count) or `set` (duplicates ignored);
+  row order is ignored in both modes
 - `workers`: concurrency used by VeriEQL, SQLite execution, and SQLDriller
   counterexample generation
 - `resume` / `overwrite`: artifact reuse behavior
@@ -368,6 +411,10 @@ Included configs:
 - `configs/smoke/bird-train.yaml`: normalize BIRD train only.
 - `configs/experiments/bird-full.yaml`: normalize BIRD dev+train.
 - `configs/experiments/bird-full-pipeline.yaml`: full BIRD pipeline.
+- `configs/experiments/bird-full-blocker-audit.yaml`: resumable BIRD rerun
+  through equivalence filtering, bag execution, and reporting.
+- `configs/experiments/bird-full-set-sensitivity.yaml`: set-semantics execution
+  sensitivity using copied upstream artifacts.
 - `configs/experiments/bird-full-rerun-*.yaml`: stage-specific rerun/resume
   configs for an existing `outputs/bird-full` artifact directory.
 - `configs/experiments/spider2-sqlite24-full.yaml`: full pipeline on the
