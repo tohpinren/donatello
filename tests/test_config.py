@@ -61,43 +61,6 @@ timeouts:
     assert config.timeouts.sqlite_seconds == 7
 
 
-def test_result_semantics_are_loaded(tmp_path: Path) -> None:
-    path = tmp_path / "config.yaml"
-    path.write_text(
-        """
-experiment_name: set-semantics
-benchmark: bird
-bird_mode: dev
-data_root: /tmp/bird
-output_dir: outputs/set-semantics
-result_semantics: set
-""",
-        encoding="utf-8",
-    )
-
-    config = load_config(path)
-
-    assert config.result_semantics == "set"
-
-
-def test_invalid_result_semantics_are_rejected(tmp_path: Path) -> None:
-    path = tmp_path / "config.yaml"
-    path.write_text(
-        """
-experiment_name: bad-semantics
-benchmark: bird
-bird_mode: dev
-data_root: /tmp/bird
-output_dir: outputs/bad-semantics
-result_semantics: sequence
-""",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ConfigError, match="result_semantics must be one of"):
-        load_config(path)
-
-
 def test_sqldriller_python_config_is_loaded(tmp_path: Path) -> None:
     path = tmp_path / "config.yaml"
     path.write_text(

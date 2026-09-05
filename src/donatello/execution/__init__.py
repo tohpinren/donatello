@@ -22,7 +22,6 @@ from donatello.models import (
 )
 from donatello.mutation.generator import read_mutation_records
 from donatello.parallel import ordered_parallel_map
-from donatello.result_comparison import ResultSemantics, results_equal
 from donatello.sqlite_paths import resolve_sqlite_path
 
 _SAMPLE_LIMIT = 5
@@ -38,7 +37,7 @@ def run_sqlite_execution(
 
     LOGGER.info(
         "Execution stage start mutants=%s equivalence=%s output=%s "
-        "resume=%s overwrite=%s sqlite_timeout=%s workers=%s result_semantics=%s",
+        "resume=%s overwrite=%s sqlite_timeout=%s workers=%s",
         artifacts.mutants,
         artifacts.equivalence,
         artifacts.execution,
@@ -46,15 +45,10 @@ def run_sqlite_execution(
         config.overwrite,
         config.timeouts.sqlite_seconds,
         config.workers,
-        config.result_semantics,
     )
     if artifacts.execution.exists():
         if config.resume:
             existing_records = read_execution_records(artifacts.execution)
-            _validate_resumed_result_semantics(
-                existing_records,
-                expected=config.result_semantics,
-            )
             resumed = True
         if not config.overwrite:
             if not config.resume:
@@ -111,7 +105,6 @@ def run_sqlite_execution(
         workers=config.workers,
         output_path=artifacts.execution,
         data_root=config.data_root,
-        result_semantics=config.result_semantics,
     )
     records = existing_records + new_records
     summary = summarize_execution(
@@ -141,7 +134,6 @@ def execute_mutations(
     workers: int = 1,
     output_path: Path | None = None,
     data_root: Path | None = None,
-    result_semantics: ResultSemantics = "bag",
 ) -> list[ExecutionRecord]:
     """Execute retained mutants and compare them with cached gold SQL results."""
 
@@ -151,12 +143,10 @@ def execute_mutations(
         data_root=data_root,
     )
     LOGGER.info(
-        "Executing sqlite mutations pending=%s timeout_seconds=%s workers=%s "
-        "result_semantics=%s",
+        "Executing sqlite mutations pending=%s timeout_seconds=%s workers=%s",
         len(mutations),
         timeout_seconds,
         workers,
-        result_semantics,
     )
     for record in ordered_parallel_map(
         mutations,
@@ -166,7 +156,6 @@ def execute_mutations(
             timeout_seconds=timeout_seconds,
             gold_cache=gold_cache,
             data_root=data_root,
-            result_semantics=result_semantics,
         ),
     ):
         _record_result(records, record, output_path=output_path)
@@ -211,7 +200,6 @@ class _GoldQueryCache:
                 entry = _GoldCacheEntry(ready=threading.Event())
                 self._entries[key] = entry
 
-        assert entry is not None
         if owner:
             try:
                 entry.value = _execute_sql(
@@ -244,7 +232,6 @@ def _execute_mutation(
     timeout_seconds: int,
     gold_cache: _GoldQueryCache,
     data_root: Path | None,
-    result_semantics: ResultSemantics,
 ) -> ExecutionRecord:
     """Execute one mutant against SQLite."""
 
@@ -257,12 +244,7 @@ def _execute_mutation(
             mutation.mutant_id,
             exc,
         )
-        return _error_record(
-            mutation,
-            "gold",
-            exc,
-            result_semantics=result_semantics,
-        )
+        return _error_record(mutation, "gold", exc)
 
     try:
         sqlite_path = _resolved_sqlite_path(mutation, data_root=data_root)
@@ -277,18 +259,9 @@ def _execute_mutation(
             mutation.mutant_id,
             exc,
         )
-        return _error_record(
-            mutation,
-            "mutant",
-            exc,
-            result_semantics=result_semantics,
-        )
+        return _error_record(mutation, "mutant", exc)
 
-    outcome: ExecutionOutcome = (
-        "survived"
-        if results_equal(gold_rows, mutant_rows, semantics=result_semantics)
-        else "killed"
-    )
+    outcome: ExecutionOutcome = "survived" if gold_rows == mutant_rows else "killed"
     LOGGER.debug(
         "Execution compared mutant_id=%s outcome=%s gold_rows=%s mutant_rows=%s",
         mutation.mutant_id,
@@ -305,7 +278,6 @@ def _execute_mutation(
         sqlite_path=mutation.sqlite_path,
         rule=mutation.rule,
         profile=mutation.profile,
-        result_semantics=result_semantics,
         gold_row_count=len(gold_rows),
         mutant_row_count=len(mutant_rows),
         gold_sample=_sample_rows(gold_rows),
@@ -499,8 +471,6 @@ def _error_record(
     mutation: MutationRecord,
     phase: str,
     error: Exception,
-    *,
-    result_semantics: ResultSemantics,
 ) -> ExecutionRecord:
     """Build an execution error record for one mutant."""
 
@@ -516,7 +486,6 @@ def _error_record(
         sqlite_path=mutation.sqlite_path,
         rule=mutation.rule,
         profile=mutation.profile,
-        result_semantics=result_semantics,
         error_phase=phase,
         error=str(error),
     )
@@ -525,7 +494,10 @@ def _error_record(
 def _sample_rows(rows: list[tuple[Any, ...]]) -> list[list[Any]]:
     """Return a JSON-safe sample of result rows."""
 
-    return [[_serialize_value(value) for value in row] for row in rows[:_SAMPLE_LIMIT]]
+    return [
+        [_serialize_value(value) for value in row]
+        for row in rows[:_SAMPLE_LIMIT]
+    ]
 
 
 def _serialize_value(value: Any) -> Any:
@@ -540,30 +512,6 @@ def _count(records: list[ExecutionRecord], outcome: ExecutionOutcome) -> int:
     """Count records with one execution outcome."""
 
     return sum(1 for record in records if record.outcome == outcome)
-
-
-def _validate_resumed_result_semantics(
-    records: list[ExecutionRecord],
-    *,
-    expected: ResultSemantics,
-) -> None:
-    """Prevent resumed execution artifacts from mixing comparison policies."""
-
-    recorded = {record.result_semantics for record in records}
-    if not recorded:
-        return
-    if None in recorded:
-        raise ValueError(
-            "Existing execution.jsonl does not record result semantics. "
-            "Rerun execution with overwrite: true."
-        )
-    if recorded != {expected}:
-        values = ", ".join(sorted(str(value) for value in recorded))
-        raise ValueError(
-            "Existing execution.jsonl uses result semantics "
-            f"{values}; config requests {expected}. Use a separate output_dir "
-            "or rerun execution with overwrite: true."
-        )
 
 
 def _skipped_stages(config: ExperimentConfig) -> list[str]:

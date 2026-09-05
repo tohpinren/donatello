@@ -24,7 +24,6 @@ from donatello.models import (
     MutationRecord,
 )
 from donatello.mutation.generator import write_mutation_records
-from donatello.result_comparison import ResultSemantics
 
 
 def test_sqlite_execution_runs_only_proven_non_equivalent_mutants(
@@ -117,43 +116,6 @@ def test_sqlite_execution_classifies_outcomes_and_scores(
     assert rows["mutant_error"].error_phase == "mutant"
     assert rows["gold_error"].outcome == "error"
     assert rows["gold_error"].error_phase == "gold"
-
-
-def test_sqlite_execution_distinguishes_bag_from_set_semantics(
-    tmp_path: Path,
-) -> None:
-    db_path = _write_duplicate_company_db(tmp_path / "company.sqlite")
-    outcomes: dict[str, str] = {}
-
-    for result_semantics in ("bag", "set"):
-        run_root = tmp_path / result_semantics
-        artifacts = artifacts_for(run_root / "outputs")
-        artifacts.ensure_base_dirs()
-        write_mutation_records(
-            artifacts.mutants,
-            [
-                _mutation(
-                    "distinct",
-                    db_path=db_path,
-                    gold_sql="SELECT name FROM employees",
-                    mutant_sql="SELECT DISTINCT name FROM employees",
-                )
-            ],
-        )
-        write_equivalence_records(
-            artifacts.equivalence,
-            [_equivalence("distinct", "proven_non_equivalent")],
-        )
-
-        run_sqlite_execution(
-            _config(run_root, result_semantics=result_semantics),
-            artifacts=artifacts,
-        )
-        [record] = read_execution_records(artifacts.execution)
-        outcomes[result_semantics] = record.outcome
-        assert record.result_semantics == result_semantics
-
-    assert outcomes == {"bag": "killed", "set": "survived"}
 
 
 def test_sqlite_execution_remaps_stale_sqlite_paths_via_data_root(
@@ -601,7 +563,6 @@ def test_sqlite_execution_resumes_existing_artifact(tmp_path: Path) -> None:
             sqlite_path="/tmp/example.sqlite",
             rule="c_multi_dist",
             profile="canonical",
-            result_semantics="bag",
             gold_row_count=1,
             mutant_row_count=1,
         )
@@ -614,35 +575,6 @@ def test_sqlite_execution_resumes_existing_artifact(tmp_path: Path) -> None:
     assert summary.executed_count == 1
     assert summary.survived_count == 1
     assert read_execution_records(artifacts.execution) == existing
-
-
-def test_sqlite_execution_rejects_resume_with_different_result_semantics(
-    tmp_path: Path,
-) -> None:
-    artifacts = artifacts_for(tmp_path / "outputs")
-    artifacts.ensure_base_dirs()
-    write_execution_records(
-        artifacts.execution,
-        [
-            ExecutionRecord(
-                mutant_id="m1",
-                example_id="bird:dev:000000",
-                outcome="survived",
-                gold_sql="SELECT 1",
-                mutant_sql="SELECT 1",
-                sqlite_path="/tmp/example.sqlite",
-                rule="c_multi_dist",
-                profile="canonical",
-                result_semantics="bag",
-            )
-        ],
-    )
-
-    with pytest.raises(ValueError, match="uses result semantics bag"):
-        run_sqlite_execution(
-            _config(tmp_path, result_semantics="set"),
-            artifacts=artifacts,
-        )
 
 
 def test_sqlite_execution_overwrites_existing_artifact(tmp_path: Path) -> None:
@@ -705,21 +637,6 @@ def _write_company_db(path: Path) -> Path:
     return path
 
 
-def _write_duplicate_company_db(path: Path) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(path)
-    try:
-        connection.executescript(
-            """
-            CREATE TABLE employees (id INTEGER PRIMARY KEY, name TEXT);
-            INSERT INTO employees (id, name) VALUES (1, 'Ada'), (2, 'Ada');
-            """
-        )
-    finally:
-        connection.close()
-    return path
-
-
 def _config(
     tmp_path: Path,
     *,
@@ -727,7 +644,6 @@ def _config(
     overwrite: bool = False,
     sqlite_seconds: int = 120,
     workers: int = 1,
-    result_semantics: ResultSemantics = "bag",
 ) -> ExperimentConfig:
     return ExperimentConfig(
         experiment_name="test",
@@ -735,7 +651,6 @@ def _config(
         bird_mode="dev",
         data_root=tmp_path / "bird",
         output_dir=tmp_path / "outputs",
-        result_semantics=result_semantics,
         workers=workers,
         resume=resume,
         overwrite=overwrite,
@@ -756,7 +671,6 @@ def _mutation(
     mutant_id: str,
     *,
     db_path: Path,
-    gold_sql: str = "SELECT name FROM employees ORDER BY id",
     mutant_sql: str = "SELECT name FROM employees ORDER BY id",
 ) -> MutationRecord:
     return MutationRecord(
@@ -771,7 +685,7 @@ def _mutation(
         profile="canonical",
         status="generated",
         skip_reason=None,
-        gold_sql=gold_sql,
+        gold_sql="SELECT name FROM employees ORDER BY id",
         mutant_sql=mutant_sql,
         sqlite_path=str(db_path),
         sqlite_relpath="company.sqlite",

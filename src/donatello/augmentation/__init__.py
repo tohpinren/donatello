@@ -150,7 +150,6 @@ def run_augmentation(
         rerun_mutations,
         timeout_seconds=config.timeouts.sqlite_seconds,
         output_path=artifacts.augmented_execution,
-        result_semantics=config.result_semantics,
     )
     execution_summary = summarize_execution(
         augmented_execution_records,

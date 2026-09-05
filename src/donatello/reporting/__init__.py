@@ -14,7 +14,6 @@ from donatello.counterexamples import (
     read_counterexample_records,
     summarize_counterexamples,
 )
-from donatello.equivalence import read_equivalence_records, summarize_equivalence
 from donatello.execution import read_execution_records, summarize_execution
 from donatello.models import ExecutionRecord, ReportSummary
 
@@ -103,9 +102,6 @@ def _build_payload(
     artifacts: ExperimentArtifacts,
 ) -> dict[str, Any]:
     sections = {
-        "equivalence": (
-            "available" if artifacts.equivalence.exists() else "unavailable"
-        ),
         "execution": "available" if artifacts.execution.exists() else "unavailable",
         "counterexamples": (
             "available" if artifacts.counterexamples.exists() else "unavailable"
@@ -118,9 +114,8 @@ def _build_payload(
         ),
     }
     LOGGER.info(
-        "Reporting artifact availability equivalence=%s execution=%s "
-        "counterexamples=%s augmentation=%s augmented_execution=%s",
-        sections["equivalence"],
+        "Reporting artifact availability execution=%s counterexamples=%s "
+        "augmentation=%s augmented_execution=%s",
         sections["execution"],
         sections["counterexamples"],
         sections["augmentation"],
@@ -130,19 +125,6 @@ def _build_payload(
         read_execution_records(artifacts.execution)
         if artifacts.execution.exists()
         else []
-    )
-    equivalence_records = (
-        read_equivalence_records(artifacts.equivalence)
-        if artifacts.equivalence.exists()
-        else []
-    )
-    equivalence_summary = (
-        summarize_equivalence(
-            equivalence_records,
-            output_path=artifacts.equivalence,
-        )
-        if equivalence_records
-        else None
     )
     augmented_execution_records = (
         read_execution_records(artifacts.augmented_execution)
@@ -196,26 +178,8 @@ def _build_payload(
             "mode": config.bird_mode,
             "enabled_stages": config.stages.enabled(),
         },
-        "result_comparison": {
-            "configured_semantics": config.result_semantics,
-            "duplicates": (
-                "multiplicity_preserved"
-                if config.result_semantics == "bag"
-                else "duplicates_ignored"
-            ),
-            "row_order": "ignored",
-            "recorded_semantics": sorted(
-                {
-                    record.result_semantics or "legacy_unspecified"
-                    for record in execution_records + augmented_execution_records
-                }
-            ),
-        },
         "artifacts": artifacts.as_display_dict(),
         "sections": sections,
-        "equivalence": (
-            equivalence_summary.__dict__ if equivalence_summary is not None else None
-        ),
         "scores": {
             "original": original_score,
             "augmented": augmented_score,
@@ -293,12 +257,6 @@ def _render_markdown(payload: dict[str, Any]) -> str:
         f"Benchmark: {payload['experiment']['benchmark']}",
         f"Mode: {payload['experiment']['mode']}",
         "",
-        "## Result Comparison",
-        "",
-        f"Semantics: {payload['result_comparison']['configured_semantics']}",
-        f"Duplicates: {payload['result_comparison']['duplicates']}",
-        f"Row order: {payload['result_comparison']['row_order']}",
-        "",
         "## Scores",
         "",
         f"Original mutation score: {_format_score(payload['scores']['original'])}",
@@ -311,18 +269,6 @@ def _render_markdown(payload: dict[str, Any]) -> str:
     for name, status in payload["sections"].items():
         lines.append(f"- {name}: {status}")
     lines.extend(["", "## Counts", ""])
-    if payload["equivalence"] is not None:
-        equivalence = payload["equivalence"]
-        lines.append(
-            "VeriEQL: "
-            f"{equivalence['proven_equivalent_count']} proven equivalent, "
-            f"{equivalence['proven_non_equivalent_count']} proven non-equivalent, "
-            f"{equivalence['timeout_count']} timeout, "
-            f"{equivalence['unsupported_count']} unsupported, "
-            f"{equivalence['error_count']} error"
-        )
-    else:
-        lines.append("VeriEQL: unavailable")
     if payload["counterexamples"] is not None:
         counterexamples = payload["counterexamples"]
         lines.append(
